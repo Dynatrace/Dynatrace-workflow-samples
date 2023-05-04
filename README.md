@@ -1,10 +1,10 @@
 # Dynatrace-workflow-samples
 
-This repository collects sample workflows and javascripts snippets for Dynatrace Automation Engine. 
+This repository collects sample workflows and javascripts snippets for Dynatrace AutomationEngine and the Workflows app. 
 
 ## Getting Started with Dynatrace Automation Engine
 
-To get started with Dynatrace Workflow Automation Engine see [the documentation](https://www.dynatrace.com/support/help/platform/automationengine).
+To get started refer to the [Dynatrace AutomationEngine](https://www.dynatrace.com/support/help/shortlink/automationengine) and [Workflows](https://www.dynatrace.com/support/help/shortlink/workflows) documentation.
 
 
 ## License
@@ -17,7 +17,7 @@ You can import a workflow via API, via workflow UI (cooming soon) or via Monaco 
 For explanation on how to import a workflow see [README.md](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/howtoimportexport/readme.md) 
 
 ### Code snippets
-Within a workflow, click on "new task", select "Run Javascript" and copy/paste the snippet into the Javascript ation.
+Within a workflow, click on "new task", select "Run Javascript" and copy/paste the snippet into the Javascript action.
 
 ## How to contribute 
 
@@ -27,6 +27,7 @@ You can export a workflow via API, via workflow UI (cooming soon) or via Monaco 
 For explanation on how to export a workflow see [README.md](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/howtoimportexport/readme.md) 
 
 ### Code snippets
+
 Within a workflow, click on the respective Javascript tasks, and copy the code snippets. Add a new file with your code snippet. For example syntax see [samples](https://github.com/Dynatrace/Dynatrace-workflow-samples/samples/javasript/)
 
 ### Create a pull request and upload your contribution 

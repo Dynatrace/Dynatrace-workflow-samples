@@ -13,7 +13,6 @@
 - Use <POST> /workflows to import the workflow. You can find example http calls in [examples.http](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/examples.http) 
 - Alternativately you can import the workflow [import_one_wf.json](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/import_one_wf.json), which allows you to import workflows via a workflow
 
-
 ### Export  workflow via API
 
 - Use <GET> /workflows respectively <GET> /workflows/{id} to export one or all workflows. You can find example http calls in [examples.http](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/examples.http)
@@ -26,4 +25,3 @@ cooming soon
 ## Import or export via Monaco
 
 cooming soon
-
