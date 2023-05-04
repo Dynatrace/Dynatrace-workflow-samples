@@ -1,0 +1,61 @@
+{
+      "title": "export-all-workflows-to-repository - template",
+    "tasks": {
+        "upload-to-github": {
+            "name": "upload-to-github",
+            "input": {
+                "url": "https://api.github.com/repos/{user}/{repo}/contents/{folderstructure}/{{ _.item.name }}.json",
+                "method": "PUT",
+                "headers": {
+                    "Accept": "application/vnd.github+json",
+                    "Authorization": "Bearer",
+                    "X-GitHub-Api-Version": "2022-11-28"
+                },
+                "payload": "{\n\"message\": \"test commit\",\n\"content\": \"{{ _.item.content }}\"  \n}"
+            },
+            "action": "dynatrace.automations:http-function",
+            "position": {
+                "x": 0,
+                "y": 2
+            },
+            "conditions": {
+                "states": {
+                    "get-all-workflow-definitions-and-encode": "OK"
+                }
+            },
+            "concurrency": 1,
+            "description": "Issue an HTTP request to any API",
+            "predecessors": [
+                "get-all-workflow-definitions-and-encode"
+            ],
+            "with-items": "item in {{ result(\"get-all-workflow-definitions-and-encode\") }}"
+        },
+        "get-all-workflow-definitions-and-encode": {
+            "name": "get-all-workflow-definitions-and-encode",
+            "input": {
+                "script": "// optional import of sdk modules\nimport { coreClient } from '@dynatrace-sdk/client-core';\n\nexport default async function({execution_id}) {      \n  const r = await fetch(`/platform/automation/v0.1/workflows?`);\n  const body = await r.json();\n  console.log(\"Fetching all Workflow Definitions\"); \n  const encrypt = [];\n  var myStringArray = body.results;\n  var arrayLength = myStringArray.length;\n  for (var i = 0; i < arrayLength; i++) {\n      console.log(\"Reading and encoding workflow\", myStringArray[i].title); \n      //console.log(myStringArray[i]);\n      //console.log(myStringArray[i].title);\n      var encodedString = btoa(JSON.stringify(myStringArray[i]));\n      var dict = { \"name\": myStringArray[i].title, \"content\": encodedString }\n      encrypt.push(dict)\n      //Do something\n  }\n  \n  const me = await coreClient.getUserInfo();\n  console.log(\"Completed Successfully\");\n  console.log(\"Automated script execution on behalf of\", me.userName);\n  console.log(\"Running inside Workflow Execution\", execution_id);\n  \n  // optional result available for subsequent tasks\n  return encrypt;\n}"
+            },
+            "action": "dynatrace.automations:run-javascript",
+            "position": {
+                "x": 0,
+                "y": 1
+            },
+            "description": "Build a custom task running js Code",
+            "predecessors": []
+        }
+    },
+    "error_task": {},
+    "task_defaults": {},
+    "variables": {},
+    "usages": [],
+    "last_execution": null,
+    "description": "",
+    "extra": {},
+    "labels": {},
+    "version": 2,
+    "is_private": true,
+    "trigger_type": "Manual",
+    "schema_version": 3,
+    "schedule": null,
+    "event_trigger": null
+}

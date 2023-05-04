@@ -1,0 +1,65 @@
+{
+    "id": "f64449b8-08d1-4be3-94ba-817a69488b12",
+    "title": "import-workflows-from-repository -template",
+    "tasks": {
+        "decode-result": {
+            "name": "decode-result",
+            "input": {
+                "script": "// optional import of sdk modules\nimport { coreClient } from '@dynatrace-sdk/client-core';\n\nexport default async function({execution_id}) {      \n  const r = await fetch(`/platform/automation/v0.1/executions/${execution_id}/tasks/get-def-from-github/result`);\n  const body = await r.json();\n  //console.log(body.json.content);\n  // your code goes here \n\n  var decodedString = atob(body.json.content);\n  console.log(decodedString); \n  const rawResponse = await fetch('/platform/automation/v0.1/workflows', {\n      method: 'POST',\n      headers: {\n        'Accept': 'application/json',\n        'Content-Type': 'application/json'\n      },\n      body: decodedString\n    });\n  console.log(rawResponse);\n  const content = await rawResponse.json();\n  console.log(content);\n  \n  \n  const me = await coreClient.getUserInfo();\n  console.log(\"Automated script execution on behalf of\", me.userName);\n  console.log(\"Running inside Workflow Execution\", execution_id);\n\n  \n  // op\n\n  return decodedString;\n}"
+            },
+            "action": "dynatrace.automations:run-javascript",
+            "position": {
+                "x": 0,
+                "y": 2
+            },
+            "conditions": {
+                "states": {
+                    "get-def-from-github": "OK"
+                }
+            },
+            "description": "Build a custom task running js Code",
+            "predecessors": [
+                "get-def-from-github"
+            ]
+        },
+        "get-def-from-github": {
+            "name": "get-def-from-github",
+            "input": {
+                "url": "https://api.github.com/repos/{user}/{repo}/contents/{folderstructure}/{workflow-json-export}",
+                "method": "GET",
+                "headers": {
+                    "Authorization": "Bearer"
+                }
+            },
+            "action": "dynatrace.automations:http-function",
+            "position": {
+                "x": 0,
+                "y": 1
+            },
+            "conditions": {
+                "states": {}
+            },
+            "description": "Issue an HTTP request to any API",
+            "predecessors": []
+        }
+    },
+    "error_task": {},
+    "task_defaults": {},
+    "variables": {},
+    "usages": [],
+    "last_execution": null,
+    "description": "",
+    "extra": {},
+    "labels": {},
+    "version": 3,
+    "updated_by": "18c12b42-8bb1-49fc-8df0-96ff701188d3",
+    "actor": "18c12b42-8bb1-49fc-8df0-96ff701188d3",
+    "owner": "18c12b42-8bb1-49fc-8df0-96ff701188d3",
+    "is_private": true,
+    "trigger_type": "Manual",
+    "schema_version": 3,
+    "schedule": null,
+    "event_trigger": null,
+    "created_at": "2023-03-28T09:58:12.907411Z",
+    "updated_at": "2023-03-28T09:59:23.616573Z"
+}
