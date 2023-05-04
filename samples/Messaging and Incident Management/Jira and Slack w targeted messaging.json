@@ -1,0 +1,164 @@
+{
+    "title": "(AM) Automation Samples: Targeted Notifications",
+    "description": "",
+    "isPrivate": false,
+    "triggerType": "Event",
+    "schemaVersion": 3,
+    "trigger": {
+        "eventTrigger": {
+            "isActive": true,
+            "filterQuery": "event.kind == \"DAVIS_EVENT\" and \nevent.type == \"CUSTOM_INFO\" and \ndt.entity.host == \"HOST-XXXXXXXXXXX\"",
+            "uniqueExpression": null,
+            "triggerConfiguration": {
+                "type": "event",
+                "value": {
+                    "query": "event.kind == \"DAVIS_EVENT\" and \nevent.type == \"CUSTOM_INFO\" and \ndt.entity.host == \"HOST-XXXXXXXXXXX\"",
+                    "eventType": "events"
+                }
+            }
+        }
+    },
+    "modificationInfo": "",
+    "tasks": {
+        "get_logs": {
+            "name": "get_logs",
+            "input": {
+                "query": "fetch logs\n| filter dt.entity.host == \"{{ event()['dt.entity.host'] }}\"\n| limit 10"
+            },
+            "action": "dynatrace.automations:execute-dql-query",
+            "position": {
+                "x": 0,
+                "y": 1
+            },
+            "description": "Executes DQL query",
+            "predecessors": []
+        },
+        "get_owners": {
+            "name": "get_owners",
+            "input": {
+                "entityIds": "{{ event()[\"dt.entity.host\"] }}",
+                "responsibilities": [
+                    "Line of Business"
+                ]
+            },
+            "action": "dynatrace.ownership:get-ownership-from-entity",
+            "position": {
+                "x": 0,
+                "y": 3
+            },
+            "conditions": {
+                "states": {
+                    "create_jira_issue": "OK"
+                }
+            },
+            "description": "Retrieves entity and extracts ownership data from it.",
+            "predecessors": [
+                "create_jira_issue"
+            ]
+        },
+        "create_jira_issue": {
+            "name": "create_jira_issue",
+            "input": {
+                "labels": [
+                    "and_two"
+                ],
+                "project": {
+                    "id": "10000",
+                    "key": "TEST",
+                    "name": "Testproject (TEST)"
+                },
+                "summary": "Problemevent {{ event()[\"dt.entity.host\"] }}",
+                "assignee": {
+                    "id": "",
+                    "displayName": ""
+                },
+                "priority": {
+                    "id": "1",
+                    "name": "Highest"
+                },
+                "reporter": {
+                    "id": "",
+                    "displayName": ""
+                },
+                "issueType": {
+                    "id": "10009",
+                    "name": "Bug"
+                },
+                "components": [],
+                "description": "*Information for  {{ event()[\"dt.entity.host\"] }}*\n\nA custom info event was ingested. Please find the last 10 logs attached.\n\n{% for log in result(\"get_logs\").records %}\n  - {{ log.content }}\n{% endfor %}",
+                "connectionId": ""
+            },
+            "action": "dynatrace.jira:jira-create-issue",
+            "active": true,
+            "position": {
+                "x": 0,
+                "y": 2
+            },
+            "conditions": {
+                "states": {
+                    "get_logs": "OK"
+                }
+            },
+            "description": "Create new Jira issues with various fields",
+            "predecessors": [
+                "get_logs"
+            ]
+        },
+        "get_contact_details": {
+            "name": "get_contact_details",
+            "input": {
+                "ownersJson": "{{result(\"get_owners\")}}",
+                "integrationTypes": [
+                    "SLACK",
+                    "JIRA"
+                ],
+                "integrationTypesTotalCount": 4
+            },
+            "action": "dynatrace.ownership:get-contact-details-from-owners",
+            "position": {
+                "x": 0,
+                "y": 4
+            },
+            "conditions": {
+                "states": {
+                    "get_owners": "OK"
+                }
+            },
+            "description": "Extracts a list of contact details from teams that are returned by the \"get_owners\" workflow action. Additionally, the contact details can be filtered by the contact type.",
+            "predecessors": [
+                "get_owners"
+            ]
+        },
+        "send_message_to_dyn_channel": {
+            "name": "send_message_to_dyn_channel",
+            "input": {
+                "channel": "{{ _.contactDetail.slackChannel }}",
+                "message": "Information for  {{ event()[\"dt.entity.host\"] }}\nDynatrace created a ticket, for more details see {{ result(\"create_jira_issue\").url }}",
+                "reaction": [],
+                "connection": "",
+                "workflowID": "{{ execution().workflow.id }}",
+                "executionID": "{{ execution().id }}",
+                "executionDate": "{{ execution().started_at }}",
+                "appendToThread": false,
+                "selectedRequestType": 0,
+                "attachmentToggleValue": "none"
+            },
+            "action": "dynatrace.slack:slack-send-message",
+            "position": {
+                "x": 0,
+                "y": 5
+            },
+            "conditions": {
+                "states": {
+                    "get_contact_details": "OK"
+                }
+            },
+            "withItems": "contactDetail in {{ result(\"get_contact_details\").contactDetails }}",
+            "concurrency": 1,
+            "description": "Send a message to a Slack workspace",
+            "predecessors": [
+                "get_contact_details"
+            ]
+        }
+    }
+}
