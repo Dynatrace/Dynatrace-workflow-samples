@@ -8,7 +8,7 @@ To get started with Dynatrace Workflow Automation Engine see [the documentation]
 
 
 ## License
-[Apache License v2.0](https://github.com/dynatrace-oss/xxxx/blob/main/LICENSE).
+[Apache License v2.0](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/LICENSE).
 
 ## How to leverage workflow and code samples
 ### Workflow import
