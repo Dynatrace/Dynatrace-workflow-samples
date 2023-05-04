@@ -14,18 +14,20 @@ To get started with Dynatrace Workflow Automation Engine see [the documentation]
 ### Workflow import
 
 You can import a workflow via API, via workflow UI (cooming soon) or via Monaco (cooming soon). 
-For explanation on how to import a workflow see [README.md]](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/howtoimportexport/readme.md) 
+For explanation on how to import a workflow see [README.md](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/howtoimportexport/readme.md) 
 
 ### Code snippets
 Within a workflow, click on "new task", select "Run Javascript" and copy/paste the snippet into the Javascript ation.
-
 
 ## How to contribute 
 
 ### Export a workflow
 
 You can export a workflow via API, via workflow UI (cooming soon) or via Monaco (cooming soon). 
-For explanation on how to export a workflow see [README.md]](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/howtoimportexport/readme.md) 
+For explanation on how to export a workflow see [README.md](https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/howtoimportexport/readme.md) 
+
+### Code snippets
+Within a workflow, click on the respective Javascript tasks, and copy the code snippets. Add a new file with your code snippet. For example syntax see [samples](https://github.com/Dynatrace/Dynatrace-workflow-samples/samples/javasript/)
 
 ### Create a pull request and upload your contribution 
 Create a pull request and upload your contribution to /samples/CATEGORY. 
