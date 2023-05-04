@@ -1,31 +1,29 @@
 # Export and import workflow samples
 
-## How to import a worfklow example into your tenant
+## Import or export via API
 
-### 1.) API Import 
-Here you can find the OpenAPI 3.0 specification: https://<yourtenant>.apps.dynatrace.com/platform/swagger-ui/index.html?urls.primaryName=Automation#/workflows
+### How to access Dynatrace platform via API 
 
-a.) Use <POST> /workflows to import the workflow. You can find an example http call in xxxxx
-b.) Alternativately you can use the workflow example import_one_wf.json. Import this workflow, configure authentication and run the workflow for further imports.
+- Refer to the [documentation](https://developer.dynatrace.com/develop/access-platform-apis-from-outside/) to access platform APIs from outside and create an OAuth2 client
+- Select the following scopes: automation:workflows:read, automation:workflows:write, automation:workflows:run, automation:rules:read, automation:rules:write, automation:calendars:read, automation:calendars:write
+- Start the Launcher in your tenant, open the "API documentation App" for an OpenAPI 3.0 specification and select definition: Automation. Here you can review the API specification or download the OpenAPI definition file
 
-#### 2.) Workflow UI Import
+### Import workflow via API
 
-coming soon
+- Use <POST> /workflows to import the workflow. You can find example http calls in [examples.http](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/examples.http) 
+- Alternativately you can import the workflow [import_one_wf.json](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/import_one_wf.json), which allows you to import workflows via a workflow
 
-#### 3.) Monaco 
 
-coming soon
+### Export  workflow via API
 
-## How to export a worfklow example from your tenant
+- Use <GET> /workflows respectively <GET> /workflows/{id} to export one or all workflows. You can find example http calls in [examples.http](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/examples.http)
+- Alternativately you can import the workflow [export_all_wf.json](https://github.com/Dynatrace/Dynatrace-workflow-samples/howtoimportexport/import_one_wf.json), which allows you to export workflows via a workflow
 
-#### 1.) API Export
-Here you can find the OpenAPI 3.0 specification: https://<yourtenant>.apps.dynatrace.com/platform/swagger-ui/index.html?urls.primaryName=Automation#/workflows
+## Import or export via Workflow UI 
 
-a.) Use <GET> /workflows respectively <GET> /workflows/{id} to export one or all workflows. You can find an example http call xxx. Alternativately
-b.) Alternatively you can use the workflow example export_all_wf.json. Import this workflow and run the workflow for further exports.
+cooming soon
 
-#### 2.) Workflow UI Import
-coming soon
+## Import or export via Monaco
 
-#### 3.) Monaco 
-coming soon
+cooming soon
+
