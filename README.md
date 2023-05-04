@@ -6,7 +6,7 @@ This repository collects sample workflows and javascripts snippets for Dynatrace
 
 To get started with Dynatrace Workflow Automation Engine see [the documentation](https://www.dynatrace.com/support/help/platform/automationengine).
 
-##License 
+##License
 [Apache License v2.0](https://github.com/dynatrace-oss/xxxx/blob/main/LICENSE).
 
 ## How to leverage workflow and code samples
