@@ -19,7 +19,7 @@ export default async function ({ execution_id }) {
     return executionId;
 }
 
-// Copy this snippet into the first JavaScript action, so that it loops until it succeeded.
+// Copy this snippet into a second JavaScript action and set it to retry every e.g. 30 seconds.
 export default async function ({ execution_id }) {
 
     let executionResult
