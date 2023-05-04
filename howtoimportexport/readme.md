@@ -10,11 +10,11 @@ b.) Alternativately you can use the workflow example import_one_wf.json. Import 
 
 #### 2.) Workflow UI Import
 
-cooming soon
+coming soon
 
 #### 3.) Monaco 
 
-cooming soon
+coming soon
 
 ## How to export a worfklow example from your tenant
 
@@ -22,10 +22,10 @@ cooming soon
 Here you can find the OpenAPI 3.0 specification: https://<yourtenant>.apps.dynatrace.com/platform/swagger-ui/index.html?urls.primaryName=Automation#/workflows
 
 a.) Use <GET> /workflows respectively <GET> /workflows/{id} to export one or all workflows. You can find an example http call xxx. Alternativately
-b.) Alternatively you can use the workflow example. Import this workflow and run the workflow for further exports.
+b.) Alternatively you can use the workflow example export_all_wf.json. Import this workflow and run the workflow for further exports.
 
 #### 2.) Workflow UI Import
-cooming soon
+coming soon
 
 #### 3.) Monaco 
-cooming soon
+coming soon
