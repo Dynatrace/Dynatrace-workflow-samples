@@ -2,7 +2,7 @@
 
 This repository collects sample workflows and javascripts snippets for Dynatrace AutomationEngine and the Workflows app. 
 
-## Getting Started with Dynatrace Automation Engine
+## Getting Started with Dynatrace AutomationEngine
 
 To get started refer to the [Dynatrace AutomationEngine](https://www.dynatrace.com/support/help/shortlink/automationengine) and [Workflows](https://www.dynatrace.com/support/help/shortlink/workflows) documentation.
 
