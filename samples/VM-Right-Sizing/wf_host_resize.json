@@ -1,5 +1,4 @@
 {
-  "id": "5ad65c43-9393-46c1-8ac5-d4f2ae750400",
   "title": "Host Resize - Event Triggered",
   "description": "",
   "tasks": {
@@ -150,8 +149,6 @@
       }
     }
   },
-  "actor": "3c14a43c-e9c2-4ce6-817f-737cb977189a",
-  "owner": "0bc2624c-f423-44e1-b766-02c0a64ca725",
   "isPrivate": false,
   "schemaVersion": 3
 }
