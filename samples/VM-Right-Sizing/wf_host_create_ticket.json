@@ -126,8 +126,6 @@
       "withItems": "issue in {% if result(\"get_cpu\").records | length > 1 %} {{result(\"create_issue\")}} {% else %} [{{result(\"create_issue\")}}] {% endif %}"
     }
   },
-  "actor": "0bc2624c-f423-44e1-b766-02c0a64ca725",
-  "owner": "3c14a43c-e9c2-4ce6-817f-737cb977189a",
   "isPrivate": false,
   "schemaVersion": 3
 }
