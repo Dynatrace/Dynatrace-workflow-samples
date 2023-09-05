@@ -1,0 +1,131 @@
+{
+  "id": "27ec8c55-39e9-4c2e-8977-bc76eb89750d",
+  "title": "Host Resize - Calculate & Ticket",
+  "description": "",
+  "tasks": {
+    "get_cpu": {
+      "name": "get_cpu",
+      "description": "Identify hosts for right-sizing.",
+      "action": "dynatrace.automations:execute-dql-query",
+      "input": {
+        "query": "timeseries CPU = avg(dt.host.cpu.usage), from:now()-30d, to:now(), interval:30d, by:{dt.entity.host}\n| lookup sourceField:dt.entity.host, lookupField:id, [fetch dt.entity.host]\n| filter isNotNull(lookup.azureEnvironment)\n| filter CPU[1]>90 OR CPU[1]<15\n| fields Host = dt.entity.host,CPU=CPU[1]"
+      },
+      "position": {
+        "x": 0,
+        "y": 1
+      },
+      "predecessors": []
+    },
+    "notify_team": {
+      "name": "notify_team",
+      "description": "Notify team about new tickets.",
+      "action": "dynatrace.slack:slack-send-message",
+      "input": {
+        "channel": "C05GNSQCXMW",
+        "message": "A new JIRA ticket with ID: {{ _.issue.id }} has been created.\n{{ _.issue.url }}",
+        "reaction": [],
+        "connection": "vu9U3hXa3q0AAAABAB5hcHA6ZHluYXRyYWNlLnNsYWNrOmNvbm5lY3Rpb24ABnRlbmFudAAGdGVuYW50ACQ1ODdlNmYzZS04ZmFkLTM4ZmUtYTVhNy1mMjg0MmY5MTg0YWW-71TeFdrerQ",
+        "workflowID": "{{ execution().workflow.id }}",
+        "channelType": "id",
+        "executionID": "{{ execution().id }}",
+        "executionDate": "{{ execution().started_at }}",
+        "appendToThread": false,
+        "selectedRequestType": 0,
+        "attachmentToggleValue": "none"
+      },
+      "position": {
+        "x": 0,
+        "y": 4
+      },
+      "predecessors": [
+        "move_to_pending"
+      ],
+      "conditions": {
+        "states": {
+          "move_to_pending": "OK"
+        }
+      },
+      "retry": {
+        "count": 2,
+        "delay": 10,
+        "failedLoopIterationsOnly": true
+      },
+      "concurrency": 1,
+      "withItems": "issue in {% if result(\"get_cpu\").records | length > 1 %} {{result(\"create_issue\")}} {% else %} [{{result(\"create_issue\")}}] {% endif %}"
+    },
+    "create_issue": {
+      "name": "create_issue",
+      "description": "Open a ticket in JIRA for each host.",
+      "action": "dynatrace.jira:jira-create-issue",
+      "input": {
+        "labels": [],
+        "project": {
+          "id": "10001"
+        },
+        "summary": "Hosts with possible upsize/downsize",
+        "assignee": null,
+        "priority": null,
+        "reporter": {
+          "id": "63c15bf62341bff4fff70812"
+        },
+        "issueType": {
+          "id": "10011"
+        },
+        "components": [],
+        "description": "{{ _.host.Host }} has a CPU of {{ _.host.CPU }}",
+        "connectionId": "vu9U3hXa3q0AAAABAB1hcHA6ZHluYXRyYWNlLmppcmE6Y29ubmVjdGlvbgAGdGVuYW50AAZ0ZW5hbnQAJGJhY2IzNzBlLTI4ZjctMzE3YS04OTZjLTAzMWIwMDc4YmE4Yb7vVN4V2t6t",
+        "fieldSetters": []
+      },
+      "position": {
+        "x": 0,
+        "y": 2
+      },
+      "predecessors": [
+        "get_cpu"
+      ],
+      "conditions": {
+        "states": {
+          "get_cpu": "OK"
+        }
+      },
+      "concurrency": 1,
+      "withItems": "host in {{ result('get_cpu').records }}"
+    },
+    "move_to_pending": {
+      "name": "move_to_pending",
+      "description": "Transition the issue to 'pending'",
+      "action": "dynatrace.jira:jira-transition-issue",
+      "input": {
+        "issue": "{{ _.issue.id }}",
+        "comment": "DT Workflow moving to pending",
+        "project": "10001",
+        "issueType": "10011",
+        "connectionId": "vu9U3hXa3q0AAAABAB1hcHA6ZHluYXRyYWNlLmppcmE6Y29ubmVjdGlvbgAGdGVuYW50AAZ0ZW5hbnQAJGJhY2IzNzBlLTI4ZjctMzE3YS04OTZjLTAzMWIwMDc4YmE4Yb7vVN4V2t6t",
+        "fieldSetters": [],
+        "targetStatus": "10009"
+      },
+      "position": {
+        "x": 0,
+        "y": 3
+      },
+      "predecessors": [
+        "create_issue"
+      ],
+      "conditions": {
+        "states": {
+          "create_issue": "OK"
+        },
+        "custom": ""
+      },
+      "retry": {
+        "count": 2,
+        "delay": 5,
+        "failedLoopIterationsOnly": true
+      },
+      "concurrency": 1,
+      "withItems": "issue in {% if result(\"get_cpu\").records | length > 1 %} {{result(\"create_issue\")}} {% else %} [{{result(\"create_issue\")}}] {% endif %}"
+    }
+  },
+  "isPrivate": false,
+  "schemaVersion": 3
+}
