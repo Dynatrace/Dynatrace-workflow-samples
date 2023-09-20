@@ -1,0 +1,1 @@
+This folder is intended for Dynatrace Workflows templates exported through the Dynatrace UI.
