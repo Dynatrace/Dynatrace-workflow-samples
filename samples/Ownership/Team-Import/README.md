@@ -16,8 +16,8 @@ To use this template, please upload the workflow template file `import_teams_fro
 
 
 ## Teams from a custom source
-This template provides a workflow that first fetches teams from a file hosted on GitHub containing team infromation in a custom format.
-A mapping logic then transfers this team infromation into the structured format specified in the ownership configuration [JSON schema](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/schemas/get-schema) (`builtin:ownership.config`) that Dynatrace provides.
+This template provides a workflow that first fetches teams from a file hosted on GitHub containing team information in a custom format.
+A mapping logic then transfers this team information into the structured format specified in the ownership configuration [JSON schema](https://docs.dynatrace.com/docs/dynatrace-api/environment-api/settings/schemas/get-schema) (`builtin:ownership.config`) that Dynatrace provides.
 The second workflow action `import_teams` then imports the teams in Dynatrace.
 To use this template, please upload the workflow template file `import_teams_from_custom_source.yaml` in the Workflows app.
 
