@@ -1,0 +1,66 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.azure.connector
+        version: ^0.1.3
+      - id: dynatrace.ownership
+        version: ^1.3.2
+  inputs:
+    - type: connection
+      schema: app:dynatrace.azure.connector:microsoft-entra-identity-developer-connection
+      targets:
+        - tasks.get_groups_1.connection
+workflow:
+  title: Import teams from Azure Entra ID
+  tasks:
+    get_groups_1:
+      name: get_groups_1
+      description: Fetch your groups from Microsoft Entra Identity Developer
+      action: dynatrace.azure.connector:get-groups
+      input:
+        top: "999"
+        count: "true"
+        expand: ""
+        filter: startswith(displayname, 'team-cloudautomation-')
+        search: ""
+        select: id,displayName,description,mail,mailNickname
+        orderby: ""
+        connection: ""
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    import_teams_1:
+      name: import_teams_1
+      description: Import teams into Dynatrace.
+      action: dynatrace.ownership:import-teams-to-settings
+      input:
+        importData: '{{ result("get_groups_1") }}'
+        importType: IMPORT_AND_OVERWRITE
+        failStrategy: CONTINUE_AND_LOG_FAILURE
+        importSource: Entra ID groups
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_groups_1
+      conditions:
+        states:
+          get_groups_1: OK
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 720
+      timezone: Europe/Vienna
+      isActive: true
+      isFaulty: false
+      nextExecution: 2023-12-14T11:00:00.000Z
+      filterParameters:
+        earliestStart: 2023-11-13
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3
