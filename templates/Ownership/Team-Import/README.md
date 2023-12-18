@@ -2,12 +2,7 @@
 
 Within this directory, you'll find templates designed for importing Ownership teams through Workflows. Our data sources for this process include Microsoft Entra ID and a custom file hosted on GitHub.
 
-For a comprehensive guide on how to utilize workflows for importing new teams, please refer to the product documentation. This documentation also contains detailed information about the specific workflow action, "import_teams."
-
-This folder provides templates for importing Ownership teams via Workflows.
-As data sources, we will use Microsoft Entra ID and a custom file hosted in GitHub. 
-
-Please check the [product documentation](https://docs.dynatrace.com/docs/manage/ownership/ownership-teams#import-teams), which describes how workflows allow to import of new teams. Moreover, the documentation also provides details for the utilized [workflow action `import_teams`](https://docs.dynatrace.com/docs/manage/ownership/ownership-app#import-teams).
+For a comprehensive guide on how to utilize workflows for importing new teams, please refer to the [product documentation](https://docs.dynatrace.com/docs/manage/ownership/ownership-teams#import-teams). This documentation also contains detailed information about the specific [workflow action `import_teams`](https://docs.dynatrace.com/docs/manage/ownership/ownership-app#import-teams).
 
 ## Microsoft Entra ID
 This demo provides a workflow that queries groups from Microsoft Entra ID using the [Azure for Workflows app](https://docs.dynatrace.com/docs/platform-modules/automations/workflows/actions/microsoft-entra-id), which are then imported as teams in Dynatrace.
