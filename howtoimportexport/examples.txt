@@ -123,36 +123,11 @@ curl --request POST 'https://umsaywsjuo.dev.apps.dynatracelabs.com/platform/auto
                 "get_logs"
             ]
         },
-        "get_contact_details": {
-            "name": "get_contact_details",
-            "input": {
-                "ownersJson": "{{result(\"get_owners\")}}",
-                "integrationTypes": [
-                    "SLACK",
-                    "JIRA"
-                ],
-                "integrationTypesTotalCount": 4
-            },
-            "action": "dynatrace.ownership:get-contact-details-from-owners",
-            "position": {
-                "x": 0,
-                "y": 4
-            },
-            "conditions": {
-                "states": {
-                    "get_owners": "OK"
-                }
-            },
-            "description": "Extracts a list of contact details from teams that are returned by the \"get_owners\" workflow action. Additionally, the contact details can be filtered by the contact type.",
-            "predecessors": [
-                "get_owners"
-            ]
-        },
         "send_message_to_dyn_channel": {
             "name": "send_message_to_dyn_channel",
             "input": {
                 "channel": "{{ _.contactDetail.slackChannel }}",
-                "message": "Information for  {{ event()[\"dt.entity.host\"] }}\nDynatrace created a ticket, for more details see {{ result(\"create_jira_issue\").url }}",
+                "message": "Dear {{ _.contactDetail.teamName }}, \nInformation for {{ event()[\"dt.entity.host\"] }}\nDynatrace created a ticket, for more details see {{ result(\"create_jira_issue\").url }}",
                 "reaction": [],
                 "connection": "",
                 "workflowID": "{{ execution().workflow.id }}",
@@ -165,18 +140,18 @@ curl --request POST 'https://umsaywsjuo.dev.apps.dynatracelabs.com/platform/auto
             "action": "dynatrace.slack:slack-send-message",
             "position": {
                 "x": 0,
-                "y": 5
+                "y": 4
             },
             "conditions": {
                 "states": {
-                    "get_contact_details": "OK"
+                    "get_owners": "OK"
                 }
             },
-            "withItems": "contactDetail in {{ result(\"get_contact_details\").contactDetails }}",
+            "withItems": "contactDetail in {{ result(\"get_owners\").slackChannels }}",
             "concurrency": 1,
             "description": "Send a message to a Slack workspace",
             "predecessors": [
-                "get_contact_details"
+                "get_owners"
             ]
         }
     }
