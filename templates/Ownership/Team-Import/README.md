@@ -1,6 +1,6 @@
 # Ownership Team Imports Templates
 
-Within this directory, you'll find templates designed for importing Ownership teams through Workflows. Our data sources for this process include Microsoft Entra ID and a custom file hosted on GitHub.
+Within this directory, you'll find templates designed for importing Ownership teams through Workflows. Our data sources for this process include Microsoft Entra ID, ServiceNow and a custom file hosted on GitHub.
 
 For a comprehensive guide on how to utilize workflows for importing new teams, please refer to the [product documentation](https://docs.dynatrace.com/docs/manage/ownership/ownership-teams#import-teams). This documentation also contains detailed information about the specific [workflow action `import_teams`](https://docs.dynatrace.com/docs/manage/ownership/ownership-app#import-teams).
 
@@ -17,3 +17,8 @@ The second workflow action `import_teams` then imports the teams in Dynatrace.
 To use this template, please upload the workflow template file `import_teams_from_custom_source.yaml` in the Workflows app.
 
 Please note, that before executing this workflow, you need to add `raw.githubusercontent.com` to your [allowed outbound connections](https://developer.dynatrace.com/develop/functions/allow-outbound-connections/).
+
+## ServiceNow
+This demo provides a workflow that queries groups from ServiceNow using the [ServiceNow for Workflows app](https://docs.dynatrace.com/docs/platform-modules/automations/workflows/actions/service-now), which are then imported as teams in Dynatrace.
+The created workflow gets triggered using a fixed schedule with a 720-minute interval.
+To use this template, please upload the workflow template file `import_teams_from_servicenow.yaml` in the Workflows app.
