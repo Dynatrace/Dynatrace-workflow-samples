@@ -1,0 +1,61 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.ownership
+        version: ^1.6.0
+      - id: dynatrace.servicenow
+        version: ^0.4.0
+  inputs:
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.get_groups_1.connectionId
+workflow:
+  title: Import teams from ServiceNow
+  tasks:
+    get_groups_1:
+      name: get_groups_1
+      description: Fetch your groups from ServiceNow
+      action: dynatrace.servicenow:snow-get-groups
+      input:
+        connectionId: ""
+        sysparmQuery: nameSTARTSWITHMobile
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    import_teams_1:
+      name: import_teams_1
+      description: Import teams into Dynatrace.
+      action: dynatrace.ownership:import-teams-to-settings
+      active: true
+      input:
+        importData: '{{ result("get_groups_1") }}'
+        importType: IMPORT_AND_OVERWRITE
+        failStrategy: CONTINUE_AND_LOG_FAILURE
+        importSource: ServiceNow groups
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_groups_1
+      conditions:
+        states:
+          get_groups_1: OK
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 720
+      timezone: Europe/Vienna
+      isActive: true
+      isFaulty: false
+      nextExecution: 2024-02-13T23:00:00.000Z
+      filterParameters:
+        earliestStart: 2024-02-13
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3
