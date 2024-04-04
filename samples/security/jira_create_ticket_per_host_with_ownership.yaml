@@ -1,0 +1,617 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.452.0
+      - id: dynatrace.jira
+        version: ^3.1.3-dev.20240403T092917+994f1fd4
+      - id: dynatrace.ownership
+        version: ^1.7.1
+      - id: dynatrace.slack
+        version: ^1.3.10-dev.20240404T075444+c182e0fd
+  inputs:
+    - type: connection
+      schema: app:dynatrace.jira:connection
+      targets:
+        - tasks.comment_on_issues.connectionId
+        - tasks.create_jira_issue.connectionId
+        - tasks.fetch_existing_tickets.connectionId
+    - type: connection
+      schema: app:dynatrace.slack:connection
+      targets:
+        - tasks.notify_if_failed.connection
+        - tasks.notify_no_jira_owners.connection
+workflow:
+  title: "[Security-Demo] Critical vulnerabilities - ticket per host (Jira and Slack)"
+  tasks:
+    get_owners:
+      name: get_owners
+      description: Retrieves entity and extracts ownership data from it.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: '{{_.item["entity.id"]}}'
+        responsibilities:
+          - Security
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - get_environment_url
+      conditions:
+        states:
+          get_environment_url: OK
+        custom: '{{ result("get_vulnerabilities").records|length > 0 }}'
+      concurrency: 1
+      withItems: item in {{ result("get_vulnerabilities").records }}
+    notify_if_failed:
+      name: notify_if_failed
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      input:
+        channel: C04FV7GPTB4
+        message: >-
+          ------------------------------
+
+          Jira ticket creation/update failed for
+          {{result("get_vulnerabilities").records|length}} hosts:
+
+          {% for item in result("get_vulnerabilities").records %}
+
+          * <{{ result("get_environment_url")
+          }}ui/apps/dynatrace.classic.hosts/ui/entity/{{ item["entity.id"] }}|
+          {{ item["entity.name"] }}> 
+
+          Related to {{ item["vulnerability.ids"]|length }} new HIGH and
+          CRITICAL vulnerabilities:
+
+          {% for i in range(item["vulnerability.ids"]|length) %}
+
+          * <{{ result("get_environment_url")
+          }}ui/apps/dynatrace.classic.vulnerabilities/ui/security/vulnerabilities/{{item["vulnerability.ids"][i]}}?gtf=-2h&gf=all|
+          {{ item["vulnerability.display_ids"][i] }}> 
+
+          {% endfor %}
+
+          {% endfor %}
+
+          -------------------------------
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: id
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: 0
+        y: 8
+      predecessors:
+        - create_jira_issue
+        - comment_on_issues
+      conditions:
+        states:
+          comment_on_issues: NOK
+          create_jira_issue: NOK
+    update_jira_link:
+      name: update_jira_link
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { securityProblemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2";
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            var finding_result = await ex.result('do_tickets_already_exist');
+            const set_success=[];
+            const set_failure=[];
+
+            if(!Array.isArray(finding_result["with_tickets"])){
+              finding_result=[finding_result["with_tickets"]];
+            }
+            else{
+              finding_result=finding_result["with_tickets"];
+            }
+
+            let count = 0;
+            // assumption - order of the tickets created is the same as the entities
+            // going over the entities with owners and setting up their appropriate tracking links
+            for(let i=0; i<finding_result.length; i++){
+                console.log(JSON.stringify(finding_result[i]));
+                for(const tracking_id of finding_result[i]["tracking.ids"]){
+                    let ticket_info= finding_result[i].ticket.jira;
+                    let vulnerability_id=tracking_id.vulnerability;
+                    let entity_id=tracking_id.entity;
+                      console.log("Setting tracking link for ticket:" + ticket_info.key + " for vulnerability " + vulnerability_id + " process group: " + entity_id);
+              
+                      const bodyContent = {
+                        updates : {}
+                      };
+              
+                      bodyContent.updates[entity_id] = {
+                                url : ticket_info.self,
+                                displayName : ticket_info.key
+                      };
+              
+                      const identification = vulnerability_id + ":" + entity_id;
+              
+                      const data = await securityProblemsClient.trackingLinkBulkUpdateAndDelete({
+                                    id: vulnerability_id,
+                                    body: bodyContent,
+                                  });   
+                      console.log("Result: " + data);
+                      
+                      count++;
+                }
+            }
+
+            console.log("Updated tracking links for:" + count + " remediation items");
+            return {
+              set_success : set_success,
+              set_failure : set_failure
+            };
+          }
+      position:
+        x: -1
+        y: 8
+      predecessors:
+        - comment_on_issues
+      conditions:
+        states:
+          comment_on_issues: SUCCESS
+    add_tracking_link:
+      name: add_tracking_link
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { securityProblemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2";
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            var ticket_result = await ex.result('create_jira_issue');
+            var finding_result = await ex.result('do_tickets_already_exist');
+            const set_success=[];
+            const set_failure=[];
+            
+            if(!Array.isArray(ticket_result)){
+              ticket_result=[ticket_result];
+            }
+
+            if(!Array.isArray(finding_result["no_tickets"])){
+              finding_result=[finding_result["no_tickets"]];
+            }
+            else{
+              finding_result=finding_result["no_tickets"];
+            }
+
+            let count = 0;
+          // for new jira tickets
+
+          // {
+
+          //   "id": "10092",
+
+          //   "key": "DDD-93",
+
+          //   "url": "https://clevertrade.atlassian.net/browse/DDD-93"
+
+          // }
+            // assumption - order of the tickets created is the same as the entities
+            // going over the entities with owners and setting up their appropriate tracking links
+            for(let i=0; i<finding_result.length; i++){
+                console.log(JSON.stringify(finding_result[i]));
+                for(const tracking_id of finding_result[i]["tracking.ids"]){
+                    let ticket_info= ticket_result[i];
+                    let vulnerability_id=tracking_id.vulnerability;
+                    let entity_id=tracking_id.entity;
+                      console.log("Setting tracking link for ticket:" + ticket_info.key + " for vulnerability " + vulnerability_id + " process group: " + entity_id);
+              
+                      const bodyContent = {
+                        updates : {}
+                      };
+              
+                      bodyContent.updates[entity_id] = {
+                                url : ticket_info.url,
+                                displayName : ticket_info.key
+                      };
+              
+                      const identification = vulnerability_id + ":" + entity_id;
+              
+                      const data = await securityProblemsClient.trackingLinkBulkUpdateAndDelete({
+                                    id: vulnerability_id,
+                                    body: bodyContent,
+                                  });   
+                      console.log("Result: " + data);
+                      
+                      count++;
+                    //} 
+                }
+            }
+
+            console.log("Updated tracking links for:" + count + " remediation items");
+            return {
+              set_success : set_success,
+              set_failure : set_failure
+            };
+          }
+      position:
+        x: 1
+        y: 8
+      predecessors:
+        - create_jira_issue
+      conditions:
+        states:
+          create_jira_issue: SUCCESS
+        custom: ""
+    comment_on_issues:
+      name: comment_on_issues
+      description: Comment on a Jira issue
+      action: dynatrace.jira:jira-add-comment
+      input:
+        comment: >-
+          The following vulnerabilities were detected for {{ _.item["entity.id"]
+          }}:
+
+          {% for i in range(_.item["vulnerability.ids"]|length) %}
+
+          * [{{_.item["vulnerability.display_ids"][i]}} - {{
+          _.item["vulnerability.titles"][i]
+          }}|{{result("get_environment_url")}}ui/apps/dynatrace.classic.vulnerabilities/ui/security/vulnerabilities/{{_.item["vulnerability.ids"][i]}}?gtf=-2h&gf=all] 
+
+          {% endfor %}
+        issueID: "{{_.item.ticket.jira.key}}"
+        connectionId: ""
+      position:
+        x: -1
+        y: 7
+      predecessors:
+        - do_tickets_already_exist
+      conditions:
+        states:
+          do_tickets_already_exist: OK
+        custom: '{{ result("do_tickets_already_exist")["with_tickets"] | length > 0}}'
+      concurrency: 1
+      withItems: item in {{ result("do_tickets_already_exist")["with_tickets"] }}
+    create_jira_issue:
+      name: create_jira_issue
+      description: Create new Jira issues with various fields
+      action: dynatrace.jira:jira-create-issue
+      input:
+        labels: []
+        taskId: "{{ task().id }}"
+        project: '{{ _.item["ownership"][0]["jira"]["project"]}}'
+        summary: '{{ _.item["entity.name"] }} ({{ _.item["entity.id"] }}) - {{
+          _.item["vulnerability.display_ids"] | length }} New high-profile
+          vulnerabilities detected'
+        assignee: '{{ ({"id": _.item["ownership"][0]["jira"]["assignee"] }) }}'
+        priority: null
+        reporter: 712020:aaf417eb-62d6-4fe1-8c45-9f7effc2bee6
+        issueType: Vulnerability
+        components: []
+        description: >-
+          The following vulnerabilities were detected for [{{
+          _.item["entity.name"] }} ({{ _.item["entity.id"] }})|{{
+          result("get_environment_url")
+          }}ui/apps/dynatrace.classic.hosts/ui/entity/{{ _.item["entity.id"]
+          }}]:
+
+          {% for i in range(_.item["vulnerability.ids"]|length) %}
+
+          * [{{ _.item["vulnerability.titles"][i]
+          }}|{{result("get_environment_url")}}ui/apps/dynatrace.classic.vulnerabilities/ui/security/vulnerabilities/{{_.item["vulnerability.ids"][i]}}?gtf=-2h&gf=all] 
+
+          {% endfor %}
+        executionId: "{{ execution().id }}"
+        connectionId: ""
+        fieldSetters:
+          - key: customfield_10001
+            value: 6529d5d5-367b-40f3-8942-3fe465b0b602
+        environmentUrl: https://umsaywsjuo.dev.apps.dynatracelabs.com
+      position:
+        x: 1
+        y: 7
+      predecessors:
+        - do_tickets_already_exist
+      conditions:
+        states:
+          do_tickets_already_exist: OK
+        custom: '{{ result("do_tickets_already_exist")["no_tickets"] | length > 0}}'
+      concurrency: 1
+      withItems: item in {{ result("do_tickets_already_exist")["no_tickets"] }}
+    get_environment_url:
+      name: get_environment_url
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            // e.g. get the current execution
+            const environmentURL = globalThis.environmentUrl;
+            return environmentURL;
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_vulnerabilities
+      conditions:
+        states:
+          get_vulnerabilities: OK
+        custom: '{{ result("get_vulnerabilities").records|length > 0 }}'
+    get_vulnerabilities:
+      name: get_vulnerabilities
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          fetch events, from:now()-60m
+
+          | filter dt.system.bucket=="default_security_events"
+
+          | filter event.provider=="Dynatrace"
+
+          | filter event.kind=="SECURITY_EVENT"
+
+          | filter event.type=="VULNERABILITY_STATE_REPORT_EVENT"
+
+          | filter event.level=="ENTITY"
+
+          | filter vulnerability.stack !="CODE"
+
+          // filter for the latest snapshot per entity
+
+          | dedup {affected_entity.id, vulnerability.id}, sort:{timestamp desc}
+
+          // end of filter for the latest snapshot
+
+          | filter vulnerability.resolution.status=="OPEN" AND
+          vulnerability.mute.status=="NOT_MUTED"
+
+          | filter in(vulnerability.risk.level,{"CRITICAL","HIGH"})
+
+          // fetch only the vulnerabilities that became OPEN in the last hour
+
+          | filter toTimestamp(vulnerability.parent.resolution.change_date) >
+          now() - 1d
+
+          | expand related_entities.host.id=related_entities.hosts.ids
+
+          | summarize {
+              vulnerability.display_ids=collectArray(vulnerability.display_id),
+              vulnerability.ids=collectArray(vulnerability.id),
+              vulnerability.titles=collectArray(vulnerability.title),
+              tracking.ids=collectDistinct(record(entity=affected_entity.id,vulnerability=vulnerability.id)),
+              entity.type=takeAny(affected_entity.type)
+          }, by:{entity.id=related_entities.host.id}
+
+          | lookup [fetch dt.entity.host],
+
+          sourceField:entity.id,lookupField:id, fields:{entity.name}
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    enrich_ownership_info:
+      name: enrich_ownership_info
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            var ex = await execution(execution_id)
+            var owners_result = await ex.result('get_owners');
+            //var contact_result = await ex.result('get_contact_details');
+            var vulnerabilities_result = await ex.result('get_vulnerabilities');
+            let ownership_info=undefined;
+            let entity_info=undefined;
+            let contact_info=undefined;
+            const with_owners=[];
+            const no_owners=[];
+            
+            let i=0;
+            while(i<vulnerabilities_result.records.length){
+              ownership_info=owners_result[i];
+              entity_info=vulnerabilities_result.records[i];
+              //contact_info=contact_result[i];
+              if(ownership_info["owners"].length > 0){
+                let jira_owners=[];
+                let slack_owners=[];
+                let owner={};
+                for(const item of ownership_info["owners"]){
+                  owner.name = item.name;  
+                  owner.id = item.identifier;
+                  for(const contact of item.contactDetails){
+                    if(contact["integrationType"]=="SLACK"){
+                      owner.slack_channel=contact.slackChannel;
+                      owner.slack_url=contact.url;
+                    }
+                    if(contact["integrationType"]=="JIRA"){
+                      owner.jira={};
+                      owner.jira.project=contact.jira.project;
+                      owner.jira.assignee=contact.jira.defaultAssignee;
+                    }
+                  }
+                  if(owner){
+                    if(owner.jira){
+                      jira_owners.push(owner); 
+                    }
+                    else if(owner.slack_channel){
+                      slack_owners.push(owner);
+                    }
+                  }
+                }
+                if(jira_owners.length > 0){
+                  entity_info.ownership=jira_owners;
+                  with_owners.push(entity_info);
+                }
+                else{
+                  no_owners.push(entity_info);
+                }
+              }
+              else{
+                no_owners.push(entity_info);
+              }
+              i=i+1;
+            }
+            
+            return { 
+              "with_owners": with_owners,
+              "no_owners": no_owners
+            };
+          }
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - get_owners
+      conditions:
+        states:
+          get_owners: OK
+    notify_no_jira_owners:
+      name: notify_no_jira_owners
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      input:
+        channel: C04FV7GPTB4
+        message: >-
+          ------------------------------
+
+          No JIRA owners have been assigned to {{
+          result("enrich_ownership_info")["no_owners"] | length}} hosts:
+
+          {% for i in range(result("enrich_ownership_info")["no_owners"]|length)
+          %}
+
+          * <{{ result("get_environment_url")
+          }}ui/apps/dynatrace.classic.hosts/ui/entity/{{
+          result("enrich_ownership_info")["no_owners"][i]["entity.id"]
+          }};appswitched=true| {{
+          result("enrich_ownership_info")["no_owners"][i]["entity.name"] }}> 
+
+          Related to {{
+          result("enrich_ownership_info")["no_owners"][i]["vulnerability.display_ids"]|length
+          }} new HIGH and CRITICAL vulnerabilities:
+
+          {% endfor %}
+
+          -------------------------------
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: id
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: 1
+        y: 5
+      predecessors:
+        - enrich_ownership_info
+      conditions:
+        states:
+          enrich_ownership_info: OK
+        custom: '{{ result("enrich_ownership_info")["no_owners"] | length > 0}}'
+    fetch_existing_tickets:
+      name: fetch_existing_tickets
+      description: Execute JQL queries to fetch issues from Jira
+      action: dynatrace.jira:jira-jql-search
+      input:
+        jql: description ~ '{{ _.item["entity.name"]}}' AND status not in (Done,
+          Resolved)
+        expand: []
+        fields:
+          - key
+          - summary
+          - created
+        maxResults: 100
+        connectionId: ""
+      position:
+        x: 0
+        y: 5
+      predecessors:
+        - enrich_ownership_info
+      conditions:
+        states:
+          enrich_ownership_info: OK
+        custom: '{{ result("enrich_ownership_info")["with_owners"] | length > 0}}'
+      concurrency: 1
+      withItems: item in {{ result("enrich_ownership_info")["with_owners"] }}
+    do_tickets_already_exist:
+      name: do_tickets_already_exist
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id)
+            const owners_result = await ex.result('enrich_ownership_info');
+            const tickets_result = await ex.result('fetch_existing_tickets');
+            const with_owners=owners_result.with_owners;
+            let with_tickets=[];
+            let no_tickets=[]
+            
+            for(let i=0; i<with_owners.length; i++){
+              let ticket = tickets_result[i][0];
+              if(ticket){
+                with_owners[i].ticket={};
+                with_owners[i].ticket.jira=ticket;
+                with_tickets.push(with_owners[i]);
+              }
+              else{
+                no_tickets.push(with_owners[i]);
+              }
+            }
+            
+            return { 
+              "with_tickets": with_tickets,
+              "no_tickets": no_tickets
+            };
+          }
+      position:
+        x: 0
+        y: 6
+      predecessors:
+        - fetch_existing_tickets
+      conditions:
+        states:
+          fetch_existing_tickets: OK
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 60
+      timezone: Europe/Vienna
+      isActive: true
+      isFaulty: false
+      nextExecution: 2024-04-04T13:00:00.000Z
+      filterParameters:
+        earliestStart: 2023-08-10T00:00:00.000Z
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3

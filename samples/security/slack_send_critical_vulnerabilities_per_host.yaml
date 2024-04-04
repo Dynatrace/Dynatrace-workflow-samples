@@ -1,0 +1,142 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.452.0
+      - id: dynatrace.slack
+        version: ^1.3.10-dev.20240404T075444+c182e0fd
+  inputs:
+    - type: connection
+      schema: app:dynatrace.slack:connection
+      targets:
+        - tasks.send_notification.connection
+workflow:
+  title: "[Sample] Slack notification for critical vulnerabilities per host"
+  tasks:
+    send_notification:
+      name: send_notification
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      active: true
+      input:
+        channel: C04FV7GPTB4
+        message: >-
+          --- Security Notification ---
+
+          ------------------------------
+
+          Host {{_.item["entity.name"]}} ({{_.item["entity.id"]}}) has
+          {{_.item["vulnerability.ids"]|length}} critical vulnerabilities:
+
+          Affecting {{_.item["affected_entity.ids"] | length}} entities of type
+          {{_.item["affected_entity.type"]}}.
+
+          Vulnerabilities:
+
+          {% for i in range(_.item["vulnerability.ids"]|length) %}
+           * ({{ _.item["vulnerability.display_ids"][i] }}) {{ _.item["vulnerability.titles"][i] }}
+          {% endfor %}
+
+
+          Affected entities:
+
+          {% for i in range(_.item["affected_entity.ids"]|length) %}
+           * ({{ _.item["affected_entity.ids"][i] }}) {{ _.item["affected_entity.names"][i] }}
+          {% endfor %}
+
+          ------------------------------
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: id
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_vulnerabilities
+      conditions:
+        states:
+          get_vulnerabilities: OK
+      concurrency: 1
+      withItems: item in {{ result("get_vulnerabilities").records }}
+    get_vulnerabilities:
+      name: get_vulnerabilities
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          // fetch only recent state reports (reduce the amount of snapshots
+          fetched)
+
+          fetch events, from:now()-30m
+
+          | filter dt.system.bucket=="default_security_events"
+
+          | filter event.provider=="Dynatrace"
+
+          | filter event.kind=="SECURITY_EVENT"
+
+          | filter event.type=="VULNERABILITY_STATE_REPORT_EVENT"
+
+          | filter event.level=="ENTITY"
+
+          // get the latest snapshot per entity and vulnerability
+
+          | dedup {affected_entity.id, vulnerability.id}, sort:{timestamp desc}
+
+          // filter for open non-muted vulnerabilities
+
+          | filter vulnerability.resolution.status=="OPEN" AND
+          vulnerability.mute.status=="NOT_MUTED"
+
+          // filter for critical and high risk vulnerabilities
+
+          | filter in(vulnerability.risk.level,{"CRITICAL","HIGH"})
+
+          // fetch only the vulnerabilities that became OPEN in the last hour
+
+          | filter toTimestamp(vulnerability.resolution.change_date) > now() -
+          60m
+
+          // summarize per host
+
+          | expand related_entities.host.id=related_entities.hosts.ids
+
+          | summarize {
+              vulnerability.display_ids=collectArray(vulnerability.display_id),
+              vulnerability.ids=collectArray(vulnerability.id),
+              vulnerability.titles=collectArray(vulnerability.title),
+              tracking.ids=collectDistinct(record(entity=affected_entity.id,vulnerability=vulnerability.id)),
+              affected_entity.type=takeAny(affected_entity.type),
+              affected_entity.ids=collectArray(affected_entity.id),
+              affected_entity.names=collectArray(affected_entity.name)
+          }, by:{entity.id=related_entities.host.id}
+
+          | lookup [fetch dt.entity.host],
+
+          sourceField:entity.id,lookupField:id, fields:{entity.name}
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 60
+      timezone: Europe/Vienna
+      isActive: false
+      isFaulty: false
+      filterParameters:
+        earliestStart: 2023-08-10T00:00:00.000Z
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3

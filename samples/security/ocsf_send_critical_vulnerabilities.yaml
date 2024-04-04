@@ -1,0 +1,174 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.452.0
+  inputs: []
+workflow:
+  title: "[Sample] OCSF - send critical vulnerabilities to a third-party tool"
+  tasks:
+    send_event_to_a_tool:
+      name: send_event_to_a_tool
+      description: Issue an HTTP request to any API
+      action: dynatrace.automations:http-function
+      input:
+        url: ""
+        method: POST
+        payload: '{{result("map_ocsf_vulnerability_finding")}}'
+        failOnResponseCodes: 400-599
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - map_ocsf_vulnerability_finding
+      conditions:
+        states:
+          map_ocsf_vulnerability_finding: OK
+    map_ocsf_vulnerability_finding:
+      name: map_ocsf_vulnerability_finding
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          // optional import of sdk modules
+
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const event = ex.params?.event;
+
+            let mapped_severity_id = 0;
+            let mapped_severity = "None";
+            switch (event["vulnerability.risk.level"]) {
+                case 'CRITICAL':
+                  mapped_severity_id = 5;
+                  mapped_severity = "Critical";
+                  break;
+                case 'HIGH':
+                  mapped_severity_id = 4;
+                  mapped_severity = "High";
+                  break;
+                case 'MEDIUM':
+                  mapped_severity_id = 3;
+                  mapped_severity = "Medium";
+                  break;
+                case 'LOW':
+                  mapped_severity_id = 2;
+                  mapped_severity = "Low";
+                  break;
+                case 'NONE':
+                  mapped_severity_id = 0;
+                  mapped_severity = "Unknown";
+                  break;
+            }
+
+            let mapped_exploit_status=false;
+            if (event["vulnerability.davis_assessments.exploit_status"]=="AVAILABLE"){
+              mapped_exploit_status=true;
+            }
+
+            let mapped_vulnerable_functions = [];
+            for (const function_name in event["affected_entity.vulnerable_functions"]){
+              mapped_vulnerable_functions.push(
+                {
+                  file    :  function_name
+                }
+              );
+            }
+            event["vulnerability.risk.score"]=parseFloat(event["vulnerability.risk.score"]).toFixed(1);
+            event["vulnerability.cvss.base_score"]=parseFloat(event["vulnerability.cvss.base_score"]).toFixed(1);
+            
+            const ocsf_event = {
+              activity_name  :  "Create",
+              activity_id    :  1,
+              category_name  :  "Findings",
+              category_uuid  :  2,
+              class_name     :  "Vulnerability Finding",
+              class_uid      :  2002,
+              cloud          :  {
+                provider  :  "Dynatrace"
+              },
+              time           :  event["timestamp"],
+              finding_info   :  {
+                title    :  event["vulnerability.title"],
+                uid      :  event["vulnerability.display_id"],
+                product_uid: "Dynatrace Runtime Vulnerability Analysis",
+                src_url  :  event["vulnerability.url"],
+                types    :  [event["vulnerability.type"]]
+              },
+              metadata      :  {
+                product  :  "Dynatrace Runtime Vulnerability Analysis",
+                version  :  "1.1.0"
+              },
+              raw_data      :  event,
+              severity      :  mapped_severity,
+              severity_id   :  mapped_severity_id,
+              type_uid      :  200201,
+              type_name     :  "Vulnerability Finding: Create",
+              vulnerabilities: {
+                title        :  event["vulnerability.title"],
+                desc         :  event["vulnerability.description"],
+                vendor_name  :  "Dynatrace",
+                severity     :  event["vulnerability.risk.level"],
+                last_seen_time : event["vulnerability.resolution.change_date"],
+                is_exploit_available : mapped_exploit_status,
+                affected_packages : [
+                  {
+                    name    :  event["affected_entity.vulnerable_component.short_name"],
+                    version :  event["affected_entity.vulnerable_component.name"]
+                  }
+                ],
+                affected_code : mapped_vulnerable_functions
+              }
+            };
+            
+            console.log(JSON.stringify(ocsf_event));
+            return ocsf_event;
+          }
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+        custom: ""
+        else: STOP
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: >-
+        event.kind=="SECURITY_EVENT"
+
+        and event.type=="VULNERABILITY_STATUS_CHANGE_EVENT"
+
+        and event.level == "ENTITY"
+
+        and affected_entity.type=="PROCESS_GROUP"
+
+        and event.status_transition=="NEW_OPEN"
+
+        and (vulnerability.risk.level=="CRITICAL" or
+        vulnerability.risk.level=="HIGH")
+      isActive: true
+      uniqueExpression: null
+      triggerConfiguration:
+        type: event
+        value:
+          query: >-
+            event.kind=="SECURITY_EVENT"
+
+            and event.type=="VULNERABILITY_STATUS_CHANGE_EVENT"
+
+            and event.level == "ENTITY"
+
+            and affected_entity.type=="PROCESS_GROUP"
+
+            and event.status_transition=="NEW_OPEN"
+
+            and (vulnerability.risk.level=="CRITICAL" or
+            vulnerability.risk.level=="HIGH")
+          eventType: events
+  schemaVersion: 3
