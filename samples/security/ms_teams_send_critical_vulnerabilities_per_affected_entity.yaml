@@ -1,0 +1,281 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.452.0
+      - id: dynatrace.msteams
+        version: ^0.3.12-dev.20240404T064314+07ade937
+  inputs:
+    - type: connection
+      schema: app:dynatrace.msteams:connection
+      targets:
+        - tasks.send_notification.connectionId
+workflow:
+  title: "[Sample] MS Teams notification for critical vulnerabilities per process
+    group"
+  tasks:
+    send_notification:
+      name: send_notification
+      description: Send messages and Adaptive Cards to Microsoft Teams channels
+      action: dynatrace.msteams:send-message
+      input:
+        message: >-
+          {
+            "type": "AdaptiveCard",
+            "body": [
+              {
+                "type":"ColumnSet",
+                "columns":[
+                   {
+                      "type":"Column",
+                      "items":[
+                         {
+                            "type":"Image",
+                            "style":"default",
+                            "url":"data:image/png;base64,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",
+                            "size":"small"
+                         }
+                      ],
+                      "width":"auto"
+                   },
+                   {
+                      "type":"Column",
+                      "items":[
+                         {
+                            "type":"TextBlock",
+                            "size":"medium",
+                            "weight":"bolder",
+                            "text":"Security notification"
+                         }
+                      ],
+                      "width":"stretch"
+                   }
+                ]
+              },
+          {# Remove vulnerability type if 'Not available' #}
+
+          {% set vuln_tp_ori = _.item['vulnerability.type'] | default('') %}
+
+          {% set vuln_tp = '' %}
+
+          {% if vuln_tp_ori and vuln_tp_ori != 'Not available' %}
+
+          {% set vuln_tp = ' ' + vuln_tp_ori %}
+
+          {% endif %}
+              {
+                "type": "TextBlock",
+          {% if _.item['vulnerability.technology'] | default(false) or vuln_tp |
+          default(false) %}
+                "text": "{{ _.item['vulnerability.technology'] | default('') }}{{ vuln_tp }} vulnerability detected",
+          {% else %}
+                "text": "Not available.",
+          {% endif %}
+                "wrap": true
+              },
+              {
+                "type": "FactSet",
+                "facts": [
+                  {
+                    "title": "Process group",
+          {% if _.item['affected_entity.name'] | default(false) or
+          _.item['affected_entity.id'] | default(false) %}
+                    "value": "{{ _.item['affected_entity.name'] | default('') }} ({{ _.item['affected_entity.id'] | default('') }})"
+          {% else %}
+                    "value": "Not available."
+          {% endif %}
+                  },
+          		{
+                    "title": "Name",
+          {% if _.item['vulnerability.display_id'] | default(false) or
+          _.item['vulnerability.title'] | default(false) %}
+                    "value": "{{ _.item['vulnerability.display_id'] | default('') }} {{ _.item['vulnerability.title'] | default('') }}"
+          {% else %}
+                    "value": "Not available."
+          {% endif %}
+                  },
+                  {
+                    "title": "Status",
+          {% if _.item['event.status'] | default(false) %}
+                    "value": "{% for e in _.item['event.status'] %}{%- if loop.index == 1 -%}{{- e | upper -}}{%- else -%}{{- e | lower -}}{%- endif -%}{% endfor %}"
+          {% else %}
+                    "value": "Not available."
+          {% endif %}
+                  },
+          {% set risk_score = '%0.1f'|
+          format(_.item['vulnerability.risk.score']|float) if
+          _.item['vulnerability.risk.score'] | default(false) else false %}
+                  {
+                    "title": "Risk level",
+          {% if _.item['vulnerability.risk.level'] | default(false) and
+          risk_score %}
+                    "value": "{% for e in _.item['vulnerability.risk.level'] %}{%- if loop.index == 1 -%}{{- e | upper -}}{%- else -%}{{- e | lower -}}{%- endif -%}{% endfor %} ({{ risk_score }})"
+          {% elif risk_score %}
+                    "value": "{{ risk_score }}"
+          {% elif _.item['vulnerability.risk.level'] | default(false) %}
+                    "value": "{% for e in _.item['vulnerability.risk.level'] %}{%- if loop.index == 1 -%}{{- e | upper -}}{%- else -%}{{- e | lower -}}{%- endif -%}{% endfor %}"
+          {% else %}
+                    "value": "Not available."
+          {% endif %}
+                  },
+          {# Identify internet exposure #}
+
+          {% set exp_st_ori =
+          _.item['vulnerability.davis_assessment.exposure_status'] | default('')
+          %}
+
+          {% set exp_st = 'Cannot assess internet exposure.' %}
+
+          {% if 'PUBLIC_NETWORK' == exp_st_ori %}
+
+          {% set exp_st = 'Public internet exposure.' %}
+
+          {% elif 'NOT_DETECTED' == exp_st_ori %}
+
+          {% set exp_st = 'No public internet exposure.' %}
+
+          {% endif %}
+
+          {# Identify vulnerable function #}
+
+          {% set vul_fn_ori =
+          _.item['vulnerability.davis_assessment.vulnerable_function_status'] |
+          default('') %}
+
+          {% set vul_fn = 'Cannot assess vulnerable functions.' %}
+
+          {% if 'IN_USE' == vul_fn_ori %}
+
+          {% set vul_fn = 'Vulnerable functions in use.' %}
+
+          {% elif 'NOT_IN_USE' == vul_fn_ori %}
+
+          {% set vul_fn = 'No vulnerable functions in use.' %}
+
+          {% endif %}
+
+          {# Identify public exploit #}
+
+          {% set pub_exp_ori =
+          _.item['vulnerability.davis_assessment.exploit_status'] | default('')
+          %}
+
+          {% set pub_exp = 'Cannot assess exploit status.' %}
+
+          {% if 'AVAILABLE' == pub_exp_ori %}
+
+          {% set pub_exp = 'Public exploit published.' %}
+
+          {% elif 'NOT_AVAILABLE' == pub_exp_ori %}
+
+          {% set pub_exp = 'No public exploit published.' %}
+
+          {% endif %}
+
+          {# Identify data asset #}
+
+          {% set data_ass_ori =
+          _.item['vulnerability.davis_assessment.data_assets_status'] |
+          default('') %}
+
+          {% set data_ass = 'Cannot assess data assets.' %}
+
+          {% if 'REACHABLE' == data_ass_ori %}
+
+          {% set data_ass = 'Reachable data assets.' %}
+
+          {% elif 'NOT_DETECTED' == data_ass_ori %}
+
+          {% set data_ass = 'No reachable data assets.' %}
+
+          {% endif %}
+                  {
+                    "title": "Risk assessment",
+                    "value": "{{ exp_st }}\\\n{{ vul_fn }}\\\n{{ pub_exp }}\\\n{{ data_ass }}"
+                  }
+                ]
+              }
+            ],
+            "actions": [
+          {% if _.item['vulnerability.url'] | default(false) or
+          _.item['affected_entity.id'] | default(false) %}
+              {
+                "type": "Action.OpenUrl",
+                "title": "Open in Dynatrace",
+                "url": "{{ _.item['vulnerability.url'] }}/remediation-tracking/{{ _.item['affected_entity.id'] }}"
+              }
+          {% endif %}
+            ],
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "version": "1.4"
+          }
+        connectionId: ""
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_vulnerabilities
+      conditions:
+        states:
+          get_vulnerabilities: OK
+        custom: '{{result("get_vulnerabilities").records | length > 0}}'
+      concurrency: 1
+      withItems: item in {{result("get_vulnerabilities").records}}
+    get_vulnerabilities:
+      name: get_vulnerabilities
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          // fetch only recent state reports (reduce the amount of snapshots
+          fetched)
+
+          fetch events, from:now()-30m
+
+          | filter dt.system.bucket=="default_security_events"
+
+          | filter event.provider=="Dynatrace"
+
+          | filter event.kind=="SECURITY_EVENT"
+
+          | filter event.type=="VULNERABILITY_STATE_REPORT_EVENT"
+
+          | filter event.level=="ENTITY"
+
+          // get the latest snapshot per entity and vulnerability
+
+          | dedup {affected_entity.id, vulnerability.id}, sort:{timestamp desc}
+
+          // filter for open non-muted vulnerabilities
+
+          | filter vulnerability.resolution.status=="OPEN" AND
+          vulnerability.mute.status=="NOT_MUTED"
+
+          // filter for critical and high risk vulnerabilities
+
+          | filter in(vulnerability.risk.level,{"CRITICAL","HIGH"})
+
+          // fetch only the vulnerabilities that became OPEN in the last hour
+
+          | filter toTimestamp(vulnerability.resolution.change_date) > now() -
+          60m
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 60
+      timezone: Europe/Vienna
+      isActive: false
+      isFaulty: false
+      filterParameters:
+        earliestStart: 2023-08-10T00:00:00.000Z
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3

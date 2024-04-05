@@ -1,0 +1,430 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.452.0
+      - id: dynatrace.servicenow
+        version: ^0.7.1-dev.20240404T064824+111041e2
+  inputs:
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.create_sn_incident.connectionId
+        - tasks.comment_on_sn_incident.connectionId
+        - tasks.sn_fetch_existing_tickets.connectionId
+workflow:
+  title: "[Sample] ServiceNow - create ticket per host (static assignment)"
+  tasks:
+    add_tracking_link:
+      name: add_tracking_link
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { securityProblemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2";
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            var ticket_result = await ex.result('create_sn_incident');
+            var finding_result = await ex.result('do_tickets_already_exist');
+            const set_success=[];
+            const set_failure=[];
+            
+            if(!Array.isArray(ticket_result)){
+              ticket_result=[ticket_result];
+            }
+
+            if(!Array.isArray(finding_result["no_tickets"])){
+              finding_result=[finding_result["no_tickets"]];
+            }
+            else{
+              finding_result=finding_result["no_tickets"];
+            }
+            
+             let count = 0;
+            // for new sn tickets
+          //   {
+
+          //   "url":
+          "https://ven01383.service-now.com/nav_to.do?uri=/incident.do?sys_id=88753b5d1bcd82102bcddbd9dc4bcbec",
+
+          //   "number": "INC0135731",
+
+          //   "sys_id": "88753b5d1bcd82102bcddbd9dc4bcbec",
+
+          //   "correlation_id": "DT_HOST-0D423D5B72AF79C9"
+
+          // }
+            // assumption - order of the tickets created is the same as the entities
+            // going over the entities with owners and setting up their appropriate tracking links
+            for(let i=0; i<finding_result.length; i++){
+                console.log(JSON.stringify(finding_result[i]));
+                for(const tracking_id of finding_result[i]["tracking.ids"]){
+                    let ticket_info= ticket_result[i];
+                    let vulnerability_id=tracking_id.vulnerability;
+                    let entity_id=tracking_id.entity;
+                  
+                    console.log("Setting tracking link for ticket:" + ticket_info.number + " for vulnerability " + vulnerability_id + " process group: " + entity_id);
+              
+                      const bodyContent = {
+                        updates : {}
+                      };
+              
+                      bodyContent.updates[entity_id] = {
+                                url : ticket_info.url,
+                                displayName : ticket_info.number
+                      };
+              
+                      const identification = vulnerability_id + ":" + entity_id;
+              
+                      const data = await securityProblemsClient.trackingLinkBulkUpdateAndDelete({
+                                    id: vulnerability_id,
+                                    body: bodyContent,
+                                  });   
+                      console.log("Result: " + data);
+                      
+                      count++;
+                    } 
+            }
+
+            console.log("Updated tracking links for:" + count + " remediation items");
+            return {
+              set_success : set_success,
+              set_failure : set_failure
+            };
+          }
+      position:
+        x: 1
+        y: 6
+      predecessors:
+        - create_sn_incident
+      conditions:
+        states:
+          create_sn_incident: OK
+        custom: ""
+    create_sn_incident:
+      name: create_sn_incident
+      description: Create an incident in ServiceNow
+      action: dynatrace.servicenow:snow-create-incident
+      input:
+        group:
+          id: 1a68bc0f1b604a142bcddbd9dc4bcbff
+          displayName: ACMEApplicationSupport
+        caller: dt_demo
+        impact: "1"
+        urgency: "2"
+        category: Custom
+        description: >-
+          {{_.item["vulnerability.ids"] | length}} high profile vulnerabilities
+          has been detected 
+
+          on {{_.item["entity.name"]}} ({{_.item["entity.id"]}})
+
+          Vulnerabilities:
+
+          {% for i in range(_.item["vulnerability.ids"]|length) %}
+
+          * [{{ _.item["vulnerability.titles"][i]
+          }}|{{result("get_environment_url")}}ui/apps/dynatrace.classic.vulnerabilities/ui/security/vulnerabilities/{{_.item["vulnerability.ids"][i]}}?gtf=-2h&gf=all] 
+
+          {% endfor %}
+        subCategory: internal application
+        connectionId: ""
+        correlationId: DT_{{_.item["entity.id"]}}
+        shortDescription: ' High-profile vulnerabiklities detected on {{_.item["entity.name"]}}'
+      position:
+        x: 1
+        y: 5
+      predecessors:
+        - do_tickets_already_exist
+      conditions:
+        states:
+          do_tickets_already_exist: OK
+        custom: '{{ result("do_tickets_already_exist")["no_tickets"] | length > 0}}'
+      concurrency: 1
+      withItems: item in {{ result("do_tickets_already_exist")["no_tickets"] }}
+    get_environment_url:
+      name: get_environment_url
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            // e.g. get the current execution
+            const environmentURL = globalThis.environmentUrl;
+            return environmentURL;
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_vulnerabilities
+      conditions:
+        states:
+          get_vulnerabilities: OK
+        custom: '{{ result("get_vulnerabilities").records|length > 0 }}'
+    get_vulnerabilities:
+      name: get_vulnerabilities
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          fetch events, from:now()-60m
+
+          | filter dt.system.bucket=="default_security_events"
+
+          | filter event.provider=="Dynatrace"
+
+          | filter event.kind=="SECURITY_EVENT"
+
+          | filter event.type=="VULNERABILITY_STATE_REPORT_EVENT"
+
+          | filter event.level=="ENTITY"
+
+          | filter vulnerability.stack !="CODE"
+
+          // filter for the latest snapshot per entity
+
+          | dedup {affected_entity.id, vulnerability.id}, sort:{timestamp desc}
+
+          // end of filter for the latest snapshot
+
+          | filter vulnerability.resolution.status=="OPEN" AND
+          vulnerability.mute.status=="NOT_MUTED"
+
+          | filter in(vulnerability.risk.level,{"CRITICAL","HIGH"})
+
+          // fetch only the vulnerabilities that became OPEN in the last hour
+
+          | filter toTimestamp(vulnerability.resolution.change_date) > now() -
+          60m
+
+          // only get the new ones
+
+          | filter toTimestamp(vulnerability.parent.first_seen) > now() - 60m
+
+          | expand related_entities.host.id=related_entities.hosts.ids
+
+          | summarize {
+              vulnerability.display_ids=collectArray(vulnerability.display_id),
+              vulnerability.ids=collectArray(vulnerability.id),
+              vulnerability.titles=collectArray(vulnerability.title),
+              tracking.ids=collectDistinct(record(entity=affected_entity.id,vulnerability=vulnerability.id)),
+              entity.type=takeAny(affected_entity.type)
+          }, by:{entity.id=related_entities.host.id}
+
+          | lookup [fetch dt.entity.host],
+
+          sourceField:entity.id,lookupField:id, fields:{entity.name}
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    update_tracking_link:
+      name: update_tracking_link
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { securityProblemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2";
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            var ticket_result = await ex.result('comment_on_sn_incident');
+            var finding_result = await ex.result('do_tickets_already_exist');
+            const set_success=[];
+            const set_failure=[];
+            
+            if(!Array.isArray(ticket_result)){
+              ticket_result=[ticket_result];
+            }
+
+            if(!Array.isArray(finding_result["with_tickets"])){
+              finding_result=[finding_result["with_tickets"]];
+            }
+            else{
+              finding_result=finding_result["with_tickets"];
+            }
+            
+             let count = 0;
+            // for new sn tickets
+          //   {
+
+          //   "url":
+          "https://ven01383.service-now.com/nav_to.do?uri=/incident.do?sys_id=88753b5d1bcd82102bcddbd9dc4bcbec",
+
+          //   "number": "INC0135731",
+
+          //   "sys_id": "88753b5d1bcd82102bcddbd9dc4bcbec",
+
+          //   "correlation_id": "DT_HOST-0D423D5B72AF79C9"
+
+          // }
+            // assumption - order of the tickets created is the same as the entities
+            // going over the entities with owners and setting up their appropriate tracking links
+            for(let i=0; i<finding_result.length; i++){
+                console.log(JSON.stringify(finding_result[i]));
+                for(const tracking_id of finding_result[i]["tracking.ids"]){
+                    let ticket_info= ticket_result[i];
+                    let vulnerability_id=tracking_id.vulnerability;
+                    let entity_id=tracking_id.entity;
+                  
+                    console.log("Setting tracking link for ticket:" + ticket_info.number + " for vulnerability " + vulnerability_id + " process group: " + entity_id);
+              
+                      const bodyContent = {
+                        updates : {}
+                      };
+              
+                      bodyContent.updates[entity_id] = {
+                                url : ticket_info.url,
+                                displayName : ticket_info.number
+                      };
+              
+                      const identification = vulnerability_id + ":" + entity_id;
+              
+                      const data = await securityProblemsClient.trackingLinkBulkUpdateAndDelete({
+                                    id: vulnerability_id,
+                                    body: bodyContent,
+                                  });   
+                      console.log("Result: " + data);
+                      
+                      count++;
+                    } 
+            }
+
+            console.log("Updated tracking links for:" + count + " remediation items");
+            return {
+              set_success : set_success,
+              set_failure : set_failure
+            };
+          }
+      position:
+        x: -1
+        y: 6
+      predecessors:
+        - comment_on_sn_incident
+      conditions:
+        states:
+          comment_on_sn_incident: OK
+    comment_on_sn_incident:
+      name: comment_on_sn_incident
+      description: Comment on an incident in ServiceNow
+      action: dynatrace.servicenow:snow-comment-on-incident
+      input:
+        number: "{{_.item.ticket.servicenow.number}}"
+        comment: >-
+          {{_.item["vulnerability.ids"] | length}} high profile vulnerabilities
+          has been detected 
+
+          on {{_.item["entity.name"]}} ({{_.item["entity.id"]}})
+
+          Vulnerabilities:
+
+          {% for i in range(_.item["vulnerability.ids"]|length) %}
+
+          * [{{ _.item["vulnerability.titles"][i]
+          }}|{{result("get_environment_url")}}ui/apps/dynatrace.classic.vulnerabilities/ui/security/vulnerabilities/{{_.item["vulnerability.ids"][i]}}?gtf=-2h&gf=all] 
+
+          {% endfor %}
+        connectionId: ""
+      position:
+        x: -1
+        y: 5
+      predecessors:
+        - do_tickets_already_exist
+      conditions:
+        states:
+          do_tickets_already_exist: OK
+        custom: '{{ result("do_tickets_already_exist")["with_tickets"] | length > 0}}'
+      concurrency: 1
+      withItems: item in {{ result("do_tickets_already_exist")["with_tickets"] }}
+    do_tickets_already_exist:
+      name: do_tickets_already_exist
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id)
+            const finding_result = await ex.result('get_vulnerabilities');
+            const tickets_result = await ex.result('sn_fetch_existing_tickets');
+            const vulnerabilities=finding_result.records;
+            let with_tickets=[];
+            let no_tickets=[]
+            
+            for(let i=0; i<vulnerabilities.length; i++){
+              let ticket = tickets_result[i][0];
+              if(ticket){
+                vulnerabilities[i].ticket={};
+                vulnerabilities[i].ticket.servicenow=ticket;
+                with_tickets.push(vulnerabilities[i]);
+              }
+              else{
+                no_tickets.push(vulnerabilities[i]);
+              }
+            }
+            
+            return { 
+              "with_tickets": with_tickets,
+              "no_tickets": no_tickets
+            };
+          }
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - sn_fetch_existing_tickets
+      conditions:
+        states:
+          sn_fetch_existing_tickets: OK
+    sn_fetch_existing_tickets:
+      name: sn_fetch_existing_tickets
+      description: Search for incidents in ServiceNow
+      action: dynatrace.servicenow:snow-search-incidents
+      input:
+        connectionId: ""
+        sysparmLimit: "100"
+        sysparmQuery: correlation_id=DT_{{_.item["entity.id"]}}
+        sysparmFields: ""
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - get_environment_url
+      conditions:
+        states:
+          get_environment_url: OK
+        custom: ""
+      concurrency: 1
+      withItems: item in {{ result("get_vulnerabilities").records }}
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 60
+      timezone: Europe/Vienna
+      isActive: false
+      isFaulty: false
+      filterParameters:
+        earliestStart: 2023-08-10T00:00:00.000Z
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3
