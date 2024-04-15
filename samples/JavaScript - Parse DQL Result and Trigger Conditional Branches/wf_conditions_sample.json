@@ -1,0 +1,87 @@
+{
+  "id": "413b7276-627a-459b-aea5-f5e2678b0ef9",
+  "title": "Conditions sample",
+  "tasks": {
+    "if_status_ok": {
+      "name": "if_status_ok",
+      "action": "dynatrace.automations:run-javascript",
+      "description": "Build a custom task running js Code",
+      "input": {
+        "script": "// optional import of sdk modules\nimport { execution } from '@dynatrace-sdk/automation-utils';\n\nexport default async function ({ execution_id }) {\n  console.log(\"status OK\");\n}"
+      },
+      "position": {
+        "x": 0,
+        "y": 2
+      },
+      "predecessors": [
+        "execute_dql_query_1"
+      ],
+      "conditions": {
+        "states": {
+          "execute_dql_query_1": "OK"
+        },
+        "custom": "{{ result(\"execute_dql_query_1\")['records'] and (result(\"execute_dql_query_1\").records[0].error_count | int) <= 100 }}"
+      }
+    },
+    "execute_dql_query_1": {
+      "name": "execute_dql_query_1",
+      "action": "dynatrace.automations:execute-dql-query",
+      "description": "Executes DQL query",
+      "input": {
+        "query": "data record(k8s.namespace.name = \"easyTravel\", error_count = 456),\n     record(k8s.namespace.name = \"default\", error_count = 789),\n     record(k8s.namespace.name = \"production\", error_count = 190)\n| filter k8s.namespace.name == \"production\""
+      },
+      "position": {
+        "x": 0,
+        "y": 1
+      },
+      "predecessors": []
+    },
+    "if_status_high_error_count": {
+      "name": "if_status_high_error_count",
+      "action": "dynatrace.automations:run-javascript",
+      "description": "Build a custom task running js Code",
+      "input": {
+        "script": "export default async function ({ execution_id }) {\n    console.log('in Status high error count branch');\n}"
+      },
+      "position": {
+        "x": -1,
+        "y": 2
+      },
+      "predecessors": [
+        "execute_dql_query_1"
+      ],
+      "conditions": {
+        "states": {
+          "execute_dql_query_1": "OK"
+        },
+        "custom": "{{ result(\"execute_dql_query_1\")['records'] and (result(\"execute_dql_query_1\").records[0].error_count | int) > 100 }}"
+      }
+    },
+    "if_status_k8s_ns_not_found": {
+      "name": "if_status_k8s_ns_not_found",
+      "action": "dynatrace.automations:run-javascript",
+      "description": "Build a custom task running js Code",
+      "input": {
+        "script": "// optional import of sdk modules\nimport { execution } from '@dynatrace-sdk/automation-utils';\n\nexport default async function ({ execution_id }) {\n  console.log('Not found');\n}"
+      },
+      "position": {
+        "x": 1,
+        "y": 2
+      },
+      "predecessors": [
+        "execute_dql_query_1"
+      ],
+      "conditions": {
+        "states": {
+          "execute_dql_query_1": "OK"
+        },
+        "custom": "{{ not result(\"execute_dql_query_1\")['records'] }}"
+      }
+    }
+  },
+  "description": "",
+  "ownerType": "USER",
+  "isPrivate": true,
+  "trigger": {},
+  "schemaVersion": 3
+}

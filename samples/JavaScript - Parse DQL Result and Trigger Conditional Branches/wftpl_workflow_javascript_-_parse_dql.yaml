@@ -1,0 +1,278 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+  inputs: []
+workflow:
+  title: Workflow JavaScript - Parse DQL Result & Conditional Branch
+  tasks:
+    if_status_ok:
+      name: if_status_ok
+      description: If production error count >= 0 and <= 100
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            // e.g. get the current execution
+            const ex = await execution(execution_id);
+            console.log('in OK branch');
+
+            return { triggeredBy: ex.trigger };
+          }
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - process_dql_result
+      conditions:
+        states:
+          process_dql_result: OK
+        custom: "{{ result('process_dql_result').ret_status == \"Status-OK\"}}"
+    dql_get_k8s_errors:
+      name: dql_get_k8s_errors
+      description: DQL to get error count by K8s namespace
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          data record(k8s.namespace.name = "easyTravel", error_count = 456),
+               record(k8s.namespace.name = "default", error_count = 789),
+               record(k8s.namespace.name = "production", error_count = 90)
+          // | filter k8s.namespace.name == "production"
+
+
+          /*
+
+          Above DQL 'data' command generates sample data during query runtime.
+          It is intended to test and document query scenarios based on a small,
+          exemplary dataset. 
+
+          This makes it a lot easier to generate instant test (dummy) data test
+          for the following Workflow.
+
+          Above DQL query can also be run in a Notebook. Result:
+
+            k8s.namespace.name       | error_count
+            -------------------------|---------
+            easyTravel               | 456
+            default                  | 789
+            production               | 100
+
+          To test the 3 scenarios of this Workflow, simply update field
+          'error_count' for k8s namespace 'production' and run the Workflow.
+          Example:
+
+          - If production error count > 100 ---> Workflow ends in branch
+          'if_status_high_error_count'
+
+          - If production error count between 0 and 100 ---> Workflow ends in
+          branch 'if_status_ok'
+
+          - If k8s namespace 'production' does not exist ---> Workflow ends in
+          branch 'if_status_k8s_ns_not_found'
+
+
+
+          In a real world scenario, an equivalent DQL query could be as follows:
+
+
+          fetch logs, from:now() - 1h
+
+          | filter loglevel =="ERROR" and isNotNull(k8s.namespace.name)
+
+          | summarize error_count=count(), by:{k8s.namespace.name}
+
+          | sort error_count desc
+
+          | limit 3
+
+
+          */
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    process_dql_result:
+      name: process_dql_result
+      description: Process result of DQL query (from previous task)
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          // optional import of sdk modules
+
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+
+          export default async function ({ execution_id }) {
+
+            // --------------------------------------------
+            // Step 1) Get result from previous DQL task
+            // --------------------------------------------
+            console.log("get result from previous task...");
+            const exe = await execution(execution_id);
+            const result_json_array = await exe.result("dql_get_k8s_errors");
+            console.log("result_json_array");
+            console.log(result_json_array); 
+            console.log("------------------------------");
+            
+            /* 
+            DQL result returns (from previous step) returns 3 result rows. Example:
+            
+            k8s.namespace.name       | error_count
+            -------------------------|---------
+            easyTravel               | 456
+            default                  | 789
+            production               | 100
+
+            in JSON format:
+            
+            records: [
+               { error_count: "456", "k8s.namespace.name": "easyTravel" },
+               { error_count: "789", "k8s.namespace.name": "default" },
+               { error_count: "90", "k8s.namespace.name": "production" }
+            ],
+            */
+            
+
+            var production_error_count = -1;
+            // --------------------------------------------
+            // Step 2) - Option 1) From JSON result array: Assign to JavaScript variable
+            // 
+            // Easiest option: Filter first DQL to Production namespace only (see example),
+            // meaning there will only be 1 result record which makes it easier and you don't have to iterate through the JSON array
+            // -------------------------------------------- 
+            // var production_error_count = result_json_array.records[0]['error_count'];
+            // var k8s_namespace = result_json_array.records[0]['k8s.namespace.name'];
+            // console.log("production_error_count");
+            // console.log(production_error_count);
+            // console.log("k8s_namespace");
+            // console.log(k8s_namespace);
+            // console.log("************************");
+
+            
+            // --------------------------------------------
+            // Step 2) - Option 2) From JSON result array: Iterate through JSON array
+            // 
+            // Iterate through JSON array and find k8s namespace with value "production" 
+            // Option if there are more than 1 result record, compared to above Step 2) - Option 1)
+            // -------------------------------------------- 
+            var i = 0;
+
+            while (i < result_json_array.records.length) {
+              var k8s_namespace = result_json_array.records[i]['k8s.namespace.name'];
+              console.log("k8s_namespace: " + k8s_namespace);
+
+              if (k8s_namespace === "production"){
+                console.log("production k8s namespace found!");
+                production_error_count = result_json_array.records[i]['error_count'];
+              }
+              
+              i++;
+            }
+
+            // --------------------------------------------
+            // Step 3) - Return status, depending on # of errors. Possible scenarios:
+            //
+            //    Scenario                                   | Status
+            //    -------------------------------------------|---------------
+            //    production error count >= 100              | Status-High-Error-Count
+            //    production error count between 0 and 100   | Status-OK
+            //    production k8s namespace not found         | Status-K8s-Prod-Namespace-Not-Found
+            //
+            // -------------------------------------------- 
+
+
+            console.log("production_error_count: " + production_error_count);
+
+            var status = null;
+
+            if (production_error_count > 100 ){
+              console.log("state NOT OK ---> high error count");
+              status = "Status-High-Error-Count";
+            } 
+            else if (production_error_count >= 0 && production_error_count <= 100){
+              console.log("state OK ---> errors between 0 and 100");
+              status = "Status-OK";
+            }
+            else {
+              console.log("state Error ---> K8s production namespace not found");
+              status = "Status-K8s-Prod-Namespace-Not-Found";
+            }
+
+            console.log("status: " + status);
+
+            return {
+              ret_status: status,
+              ret_production_error_count: production_error_count
+            };
+
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - dql_get_k8s_errors
+      conditions:
+        states:
+          dql_get_k8s_errors: OK
+    if_status_high_error_count:
+      name: if_status_high_error_count
+      description: "If production error count > 100 "
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            // e.g. get the current execution
+            const ex = await execution(execution_id);
+            console.log('in Status high error count branch');
+
+            return { triggeredBy: ex.trigger };
+          }
+      position:
+        x: -1
+        y: 3
+      predecessors:
+        - process_dql_result
+      conditions:
+        states:
+          process_dql_result: OK
+        custom: "{{ result('process_dql_result').ret_status ==
+          \"Status-High-Error-Count\"}}"
+    if_status_k8s_ns_not_found:
+      name: if_status_k8s_ns_not_found
+      description: If production namespace not found
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            // e.g. get the current execution
+            const ex = await execution(execution_id);
+            console.log('Automated script execution on behalf of', ex.trigger);
+
+            return { triggeredBy: ex.trigger };
+          }
+      position:
+        x: 1
+        y: 3
+      predecessors:
+        - process_dql_result
+      conditions:
+        states:
+          process_dql_result: OK
+        custom: "{{ result('process_dql_result').ret_status ==
+          \"Status-K8s-Prod-Namespace-Not-Found\"}}"
+  description: ""
+  trigger: {}
+  schemaVersion: 3
