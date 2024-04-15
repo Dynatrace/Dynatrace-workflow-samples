@@ -47,9 +47,12 @@ workflow:
 
           /*
 
-          Above DQL 'data' command generates sample data during query runtime. It is intended to test and document query scenarios based on a small, exemplary dataset. 
+          Above DQL 'data' command generates sample data during query runtime.
+          It is intended to test and document query scenarios based on a small,
+          exemplary dataset. 
 
-          This makes it a lot easier to generate instant test (dummy) data test for the following Workflow.
+          This makes it a lot easier to generate instant test (dummy) data test
+          for the following Workflow.
 
           Above DQL query can also be run in a Notebook. Result:
 
@@ -59,13 +62,18 @@ workflow:
             default                  | 789
             production               | 100
 
-          To test the 3 scenarios of this Workflow, simply update field 'error_count' for k8s namespace 'production' and run the Workflow. Example:
+          To test the 3 scenarios of this Workflow, simply update field
+          'error_count' for k8s namespace 'production' and run the Workflow.
+          Example:
 
-          - If production error count > 100 ---> Workflow ends in branch 'if_status_high_error_count'
+          - If production error count > 100 ---> Workflow ends in branch
+          'if_status_high_error_count'
 
-          - If production error count between 0 and 100 ---> Workflow ends in branch 'if_status_ok'
+          - If production error count between 0 and 100 ---> Workflow ends in
+          branch 'if_status_ok'
 
-          - If k8s namespace 'production' does not exist ---> Workflow ends in branch 'if_status_k8s_ns_not_found'
+          - If k8s namespace 'production' does not exist ---> Workflow ends in
+          branch 'if_status_k8s_ns_not_found'
 
 
 
@@ -105,10 +113,10 @@ workflow:
             // Step 1) Get result from previous DQL task
             // --------------------------------------------
             console.log("get result from previous task...");
-            var task_info = await fetch(`/platform/automation/v1/executions/${execution_id}/tasks/dql_get_k8s_errors`);
-            var result_json_array = await task_info.json();
+            const exe = await execution(execution_id);
+            const result_json_array = await exe.result("dql_get_k8s_errors");
             console.log("result_json_array");
-            console.log(result_json_array);
+            console.log(result_json_array); 
             console.log("------------------------------");
             
             /* 
@@ -137,8 +145,8 @@ workflow:
             // Easiest option: Filter first DQL to Production namespace only (see example),
             // meaning there will only be 1 result record which makes it easier and you don't have to iterate through the JSON array
             // -------------------------------------------- 
-            // var production_error_count = result_json_array.result.records[0]['error_count'];
-            // var k8s_namespace = result_json_array.result.records[0]['k8s.namespace.name'];
+            // var production_error_count = result_json_array.records[0]['error_count'];
+            // var k8s_namespace = result_json_array.records[0]['k8s.namespace.name'];
             // console.log("production_error_count");
             // console.log(production_error_count);
             // console.log("k8s_namespace");
@@ -154,13 +162,13 @@ workflow:
             // -------------------------------------------- 
             var i = 0;
 
-            while (i < result_json_array.result.records.length) {
-              var k8s_namespace = result_json_array.result.records[i]['k8s.namespace.name'];
+            while (i < result_json_array.records.length) {
+              var k8s_namespace = result_json_array.records[i]['k8s.namespace.name'];
               console.log("k8s_namespace: " + k8s_namespace);
 
               if (k8s_namespace === "production"){
                 console.log("production k8s namespace found!");
-                production_error_count = result_json_array.result.records[i]['error_count'];
+                production_error_count = result_json_array.records[i]['error_count'];
               }
               
               i++;

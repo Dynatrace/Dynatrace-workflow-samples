@@ -1,0 +1,90 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+  inputs: []
+workflow:
+  title: Conditions sample
+  tasks:
+    if_status_ok:
+      name: if_status_ok
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            console.log("status OK");
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - execute_dql_query_1
+      conditions:
+        states:
+          execute_dql_query_1: OK
+        custom: "{{ result(\"execute_dql_query_1\")['records'] and
+          (result(\"execute_dql_query_1\").records[0].error_count | int) <= 100
+          }}"
+    execute_dql_query_1:
+      name: execute_dql_query_1
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          data record(k8s.namespace.name = "easyTravel", error_count = 456),
+               record(k8s.namespace.name = "default", error_count = 789),
+               record(k8s.namespace.name = "production", error_count = 90)
+          | filter k8s.namespace.name == "production"
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    if_status_high_error_count:
+      name: if_status_high_error_count
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          export default async function ({ execution_id }) {
+              console.log('in Status high error count branch');
+          }
+      position:
+        x: -1
+        y: 2
+      predecessors:
+        - execute_dql_query_1
+      conditions:
+        states:
+          execute_dql_query_1: OK
+        custom: "{{ result(\"execute_dql_query_1\")['records'] and
+          (result(\"execute_dql_query_1\").records[0].error_count | int) > 100
+          }}"
+    if_status_k8s_ns_not_found:
+      name: if_status_k8s_ns_not_found
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            console.log('Not found');
+          }
+      position:
+        x: 1
+        y: 2
+      predecessors:
+        - execute_dql_query_1
+      conditions:
+        states:
+          execute_dql_query_1: OK
+        custom: "{{ not result(\"execute_dql_query_1\")['records'] }}"
+  description: ""
+  trigger: {}
+  schemaVersion: 3
