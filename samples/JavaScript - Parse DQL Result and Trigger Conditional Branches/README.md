@@ -26,4 +26,6 @@ wf_conditions_sample.json ---> Workflow exported via 'Download/Template' option 
 
 The second template / sample is a shorter version without the JavaScript step. The DQL results are evaluated directly in the conditions of the relevant branches (see screenshot below)
 
+![WF_conditions_sample](https://github.com/Dynatrace-Tomislav/Dynatrace-workflow-samples/assets/14933193/c663fb74-16f7-47e6-ac14-9cace9d8f66f)
+
 **Note:** While the second version (without JavaScript) basically achieves the same result, the first longer version (with JavaScript) provides a template / sample where the JavaScript task adds additional flexibility (to add more complex custom logic / processing of the DQL result in JavaScript, if needed).
