@@ -1,0 +1,88 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.452.0
+      - id: dynatrace.email
+        version: ^0.2.3
+      - id: dynatrace.ownership
+        version: ^1.7.1
+  inputs: []
+workflow:
+  title: Send Email
+  tasks:
+    get_logs:
+      name: get_logs
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch logs
+          | filter dt.entity.host == "{{ event()['dt.entity.host'] }}"
+          | limit 10 
+          | sort timestamp desc
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    get_owners:
+      name: get_owners
+      description: Retrieves owners from Entities and Team identifiers.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: "{{ event()['dt.entity.host'] }}"
+        responsibilities:
+          - Security
+        selectedTeamIdentifiers: []
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_logs
+      conditions:
+        states:
+          get_logs: OK
+    send_email:
+      name: send_email
+      description: Send email
+      action: dynatrace.email:send-email
+      input:
+        cc: []
+        to:
+          - '{{ result("get_owners").email[0].email }}'
+        bcc: []
+        taskId: "{{ task().id }}"
+        content: |
+          Dynatrace detected a problem at {{ event()["dt.entity.host"] }}
+
+          Here are the detailed logs: 
+          {% for logs in result("get_logs") %}
+             - {{result("get_logs").records }}
+          {% endfor %}
+        subject: Problem detected at entity {{ event()["dt.entity.host"] }}
+        executionId: "{{ execution().id }}"
+        environmentUrl: https://guu84124.apps.dynatrace.com
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - get_owners
+      conditions:
+        states:
+          get_owners: OK
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: affected_entitiy.id == "HOST-715BF59C3308FF1A"
+      isActive: false
+      uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
+        event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
+        "REFRESHED") else "resolved" }}-{{
+        event()["dt.davis.last_reopen_timestamp"] }}'
+      triggerConfiguration:
+        type: event
+        value:
+          query: affected_entitiy.id == "HOST-715BF59C3308FF1A"
+          eventType: events
+  schemaVersion: 3
