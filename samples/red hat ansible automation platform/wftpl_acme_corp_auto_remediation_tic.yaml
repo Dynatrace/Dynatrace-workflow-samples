@@ -1,0 +1,333 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.507.4
+      - id: dynatrace.ownership
+        version: ^1.7.1
+      - id: dynatrace.redhat.ansible
+        version: ^0.2.4
+      - id: dynatrace.servicenow
+        version: ^0.7.0
+      - id: dynatrace.slack
+        version: ^1.3.10
+  inputs:
+    - type: connection
+      schema: app:dynatrace.redhat.ansible:automation-controller.connection
+      targets:
+        - tasks.trigger_remediation.connectionId
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.create_incident.connectionId
+        - tasks.search_incident.connectionId
+        - tasks.comment_on_an_incident.connectionId
+        - tasks.comment_on_an_incident_1.connectionId
+    - type: connection
+      schema: app:dynatrace.slack:connection
+      targets:
+        - tasks.problem_opened_notification.connection
+workflow:
+  title: ACME Corp Auto Remediation Ticketing
+  tasks:
+    create_incident:
+      name: create_incident
+      description: Create an incident in ServiceNow
+      action: dynatrace.servicenow:snow-create-incident
+      input:
+        group:
+          id: 1a68bc0f1b604a142bcddbd9dc4bcbff
+          displayName: ACMEApplicationSupport
+        caller: ACMEIncidentUser
+        impact: "3"
+        urgency: "3"
+        category: inquiry
+        description: |-
+          Event kind: {{ event()["event.kind"]}}
+          Event name: {{ event()["event.name"] }}
+          Event category: {{ event()["event.category"] }} 
+          Affected Entity: {{event()["affected_entity_ids"]}}
+          Root cause entity: {{ event()["root_cause_entity_name"]}}
+        subCategory: internal application
+        connectionId: ""
+        correlationId: DT_{{ event()["display_id"] }}
+        shortDescription: '{{ event()["event.category"] }} {{ event()["event.name"] }}'
+      position:
+        x: 1
+        y: 3
+      predecessors:
+        - search_incident
+      conditions:
+        states:
+          search_incident: OK
+        custom: '{{ result("search_incident") | length == 0}}'
+        else: SKIP
+    post_on_problem:
+      name: post_on_problem
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          // optional import of sdk modules
+
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { problemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2";
+
+          import { executionsClient } from '@dynatrace-sdk/client-automation';
+
+
+          export default async function ({ execution_id }) {
+
+            // get the current execution
+            const ex = await executionsClient.getExecution({ id: execution_id });
+            var pid = ex.params.event['event.id']
+
+            var exec =  await execution(execution_id);
+            var ansibleData = await exec.result("trigger_remediation");
+            console.log("Data: ", ansibleData.job);
+            
+              
+            const data = await problemsClient.createComment({
+            problemId: pid,
+               body: { message: "Remediation workflow started with " +  ansibleData.job + " " + ansibleData.name, context: "Dynatrace Workflow" },
+            });
+            console.log("response: ", data);
+
+
+            
+          }
+      position:
+        x: 0
+        y: 5
+      predecessors:
+        - trigger_remediation
+      conditions:
+        states:
+          trigger_remediation: OK
+    search_incident:
+      name: search_incident
+      description: Search for incidents in ServiceNow
+      action: dynatrace.servicenow:snow-search-incidents
+      input:
+        connectionId: ""
+        sysparmLimit: "100"
+        sysparmQuery: correlation_id=DT_{{ event()["display_id"] }}
+        sysparmFields: ""
+      position:
+        x: 1
+        y: 2
+      predecessors:
+        - problem_opened_detect_remediation_actions
+      conditions:
+        states:
+          problem_opened_detect_remediation_actions: OK
+    problem_opened_meta:
+      name: problem_opened_meta
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          export default async function () {
+            return { envHref: window.location.href };
+          }
+      position:
+        x: -1
+        y: 3
+      predecessors:
+        - problem_opened_get_owners
+      conditions:
+        states:
+          problem_opened_get_owners: OK
+    trigger_remediation:
+      name: trigger_remediation
+      description: Launch a job template in Red Hat Ansible Automation Controller
+      action: dynatrace.redhat.ansible:launch-job-template
+      input:
+        templateId: '{{
+          result("problem_opened_detect_remediation_actions").records[0].remediationAction
+          }}'
+        connectionId: ""
+      position:
+        x: 1
+        y: 4
+      predecessors:
+        - create_incident
+        - comment_on_an_incident
+      conditions:
+        states:
+          create_incident: OK
+          comment_on_an_incident: OK
+        else: SKIP
+    comment_on_an_incident:
+      name: comment_on_an_incident
+      description: Comment on an incident in ServiceNow
+      action: dynatrace.servicenow:snow-comment-on-incident
+      input:
+        number: '{{ result("search_incident")[0].number}}'
+        comment: |-
+          Event kind: {{ event()["event.kind"]}}
+          Event name: {{ event()["event.name"] }}
+          Event category: {{ event()["event.category"] }} 
+          Affected Entity: {{event()["affected_entity_ids"]}}
+          Root cause entity: {{ event()["root_cause_entity_name"]}}
+        connectionId: ""
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - search_incident
+      conditions:
+        states:
+          search_incident: OK
+        custom: '{{ result("search_incident") | length > 0}}'
+        else: SKIP
+    comment_on_an_incident_1:
+      name: comment_on_an_incident_1
+      description: Comment on an incident in ServiceNow
+      action: dynatrace.servicenow:snow-comment-on-incident
+      input:
+        number: '{%if result("search_incident") | length == 0
+          %}{{result("create_incident").number}}{%else
+          %}{{result("search_incident")[0].number}}{%endif%}'
+        comment: 'Remediation initiated: {{result("trigger_remediation").id}}
+          {{result("trigger_remediation").name}} '
+        connectionId: ""
+      position:
+        x: 1
+        y: 5
+      predecessors:
+        - trigger_remediation
+      conditions:
+        states:
+          trigger_remediation: OK
+    problem_opened_get_owners:
+      name: problem_opened_get_owners
+      description: Retrieves entity and extracts ownership data from it.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: "{{ event()['root_cause_entity_id'] }}"
+        responsibilities:
+          - Development
+          - Security
+          - Operations
+          - Infrastructure
+          - Line of Business
+          - Not defined
+      position:
+        x: -1
+        y: 2
+      predecessors:
+        - problem_opened_detect_remediation_actions
+      conditions:
+        states:
+          problem_opened_detect_remediation_actions: SUCCESS
+    problem_opened_notification:
+      name: problem_opened_notification
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      input:
+        channel: '{{ result("problem_opened_get_owners").slackChannels[0].slackChannel
+          }}'
+        message: >-
+          {
+          	"blocks": [
+          		{
+          			"type": "section",
+          			"text": {
+          				"type": "mrkdwn",
+          				"text": "Dynatrace AutomationEngine :dt: \n\nA problem has been detected in your Dynatrace environment. Dynatrace DavisAI has identified *{{ event().root_cause_entity_name }}* as the root cause entity and wil automatically trigger a remediation.\n\nProblem ID:{{ event().display_id }}\nStatus: *REMEDIATION TRIGGERED*"
+          			}
+          		},
+          		{
+          			"type": "actions",
+          			"elements": [
+          				{
+          					"type": "button",
+          					"text": {
+          						"type": "plain_text",
+          						"text": "View remediation workflow"
+          					},
+          					"value": "rem_wf_link",
+          					"url": "{{ result('problem_opened_meta').envHref }}ui/apps/dynatrace.automations/executions/{{ execution().id }}"
+          				},
+          				{
+          					"type": "button",
+          					"text": {
+          						"type": "plain_text",
+          						"text": "View root cause entity"
+          					},
+          					"value": "entity_link",
+          					"url": "{{ result('problem_opened_meta').envHref }}ui/apps/dynatrace.classic.services/ui/entity/{{ event().root_cause_entity_id }}"
+          				}
+          			]
+          		}
+            ]
+          }
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: expression
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: -1
+        y: 4
+      predecessors:
+        - problem_opened_meta
+      conditions:
+        states:
+          problem_opened_meta: OK
+    problem_opened_detect_remediation_actions:
+      name: problem_opened_detect_remediation_actions
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          fetch events
+
+          | filter in(event.id, array("{{ event()['dt.davis.event_ids'] |
+          join('\", \"') }}")) and isNotNull(remediationAction)
+
+          | sort timestamp desc
+
+          | limit 1
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+        custom: "{{ event()['event.status'] == \"ACTIVE\" }}"
+        else: STOP
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: event.kind == "DAVIS_PROBLEM" AND event.status == "ACTIVE" AND
+        (event.status_transition == "CREATED" OR event.status_transition ==
+        "UPDATED" OR event.status_transition == "REOPENED") AND (event.category
+        == "ERROR") AND (isNotNull(root_cause_entity_id) ) AND
+        (matchesValue(entity_tags,
+        "[Environment]DT_RELEASE_STAGE:canary-jenkins"))
+      isActive: true
+      uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
+        event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
+        "REFRESHED") else "resolved" }}-{{
+        event()["dt.davis.last_reopen_timestamp"] }}'
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+          entityTags:
+            "[Environment]DT_RELEASE_STAGE":
+              - canary-jenkins
+          customFilter: "isNotNull(root_cause_entity_id) "
+          onProblemClose: false
+          entityTagsMatch: any
+  schemaVersion: 3

@@ -1,0 +1,404 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.507.4
+      - id: dynatrace.davis.workflow.actions
+        version: ^1.1.7
+      - id: dynatrace.ownership
+        version: ^1.7.1
+      - id: dynatrace.redhat.ansible
+        version: ^0.2.4
+      - id: dynatrace.slack
+        version: ^1.3.9
+  inputs:
+    - type: connection
+      schema: app:dynatrace.redhat.ansible:eda-webhook.connection
+      targets:
+        - tasks.send_event_to_event-driven-ansible_1.connectionId
+    - type: connection
+      schema: app:dynatrace.slack:connection
+      targets:
+        - tasks.send_message.connection
+workflow:
+  title: (AM) Mitigate CPU and failure rate with RH Event Driven Ansible
+  tasks:
+    meta_data:
+      name: meta_data
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          export default async function () {
+            return { envHref: window.location.href };
+          }
+      position:
+        x: 1
+        y: 3
+      predecessors:
+        - get_owners
+      conditions:
+        states:
+          get_owners: OK
+    get_owners:
+      name: get_owners
+      description: Retrieves owners from Entities and Team identifiers.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: "{{event().affected_entity_ids}}"
+        responsibilities:
+          - Operations
+        selectedTeamIdentifiers: []
+      position:
+        x: 0
+        y: 2
+      predecessors: []
+      conditions:
+        states: {}
+    send_message:
+      name: send_message
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      input:
+        channel: '{{ result("get_owners").slackChannels[0].slackChannel }}'
+        message: >-
+          {
+          	"blocks": [
+          		{
+          			"type": "section",
+          			"text": {
+          				"type": "mrkdwn",
+          				"text": "Dynatrace AutomationEngine :dt: \n\nA problem has been detected in your Dynatrace environment. Dynatrace DavisAI has identified *{{ event().affected_entity_ids[0] }}* as the affected entity(s) and wil automatically trigger a remediation.\n\nProblem ID:{{ event().display_id }}\nStatus: *REMEDIATION TRIGGERED WITH RED HAT EVENT DRIVEN ANSIBLE *"
+          			}
+          		},
+          		{
+          			"type": "actions",
+          			"elements": [
+          				{
+          					"type": "button",
+          					"text": {
+          						"type": "plain_text",
+          						"text": "View remediation workflow"
+          					},
+          					"value": "rem_wf_link",
+          					"url": "{{ result('meta_data').envHref }}ui/apps/dynatrace.automations/executions/{{ execution().id }}"
+          				},
+          				{
+          					"type": "button",
+          					"text": {
+          						"type": "plain_text",
+          						"text": "View affected entity"
+          					},
+          					"value": "entity_link",
+          					"url": "{{ result('meta_data').envHref }}ui/apps/dynatrace.classic.services/ui/entity/{{ event().affected_entity_ids[0] }}"
+          				}
+          			]
+          		}
+            ]
+          }
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: expression
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: 1
+        y: 4
+      predecessors:
+        - meta_data
+      conditions:
+        states:
+          meta_data: OK
+    merge_event_data:
+      name: merge_event_data
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          // optional import of sdk modules
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            // e.g. get the current execution
+            const ex = await execution(execution_id);
+            console.log('Automated script execution on behalf of', ex.trigger);
+
+            const problems = await ex.result("get_problem_details");
+            console.log(problems);
+
+            const obj1 = problems.eventInfo;
+            console.log(obj1);
+          //  const obj = JSON.parse(problems.eventInfo);
+            
+            const exprediction = await ex.result("extract_prediction");
+            const obj2 = {
+              cpu_forecast: exprediction.prediction 
+            }
+
+            const owners = await ex.result("get_owners");
+            const email = {
+              email: owners.email
+            }
+           const slack = {
+             slack: owners.slackChannels
+           }
+            
+            let result  = Object.assign(obj1,obj2,slack, email)
+            console.log(result); 
+            
+          //  obj.push(predData);
+          //  const json = JSON.stringify(obj);
+          //  console.log (json);
+            
+            return result;
+          }
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - get_owners
+        - extract_prediction
+      conditions:
+        states:
+          get_owners: OK
+          extract_prediction: OK
+    extract_prediction:
+      name: extract_prediction
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >+
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            // In this demo workflow we use a previous grail query to get a valid host ID.
+            // Usually this would come from a Davis Event
+            const res = await ex.result("forecast_service_load");
+
+            let prediction = 0.0;
+            let validPrediction = true;
+            try {
+              const points = res.result.output[0].timeSeriesDataWithPredictions.records[0]["dt.davis.forecast:point"];
+              console.log("Got these prediction: %s", points);  
+              const floatPoints = points.map(p => Number(p));
+              prediction = Math.max(...floatPoints);
+              console.log("Max value is: %s", prediction);
+            } catch (e) {
+              console.error("Unable to predict: %s", e instanceof Error ? e.message : JSON.stringify(e));
+              validPrediction = false;
+            }
+            
+            return {
+              host: "ip-172-31-58-105.ec2.internal",
+              prediction,
+              validPrediction,
+            };
+          }
+
+
+      position:
+        x: -1
+        y: 2
+      predecessors:
+        - forecast_service_load
+      conditions:
+        states:
+          forecast_service_load: OK
+    get_problem_details:
+      name: get_problem_details
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          // optional import of sdk modules
+
+          //import { metadataClient } from '@dynatrace-sdk/client-metadata';
+
+          import { executionsClient } from '@dynatrace-sdk/client-automation';
+
+          import { problemsClient } from
+          '@dynatrace-sdk/client-classic-environment-v2';
+
+          import { monitoredEntitiesClient } from
+          '@dynatrace-sdk/client-classic-environment-v2';
+
+
+          function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms))
+          }
+
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+            //const me = await metadataClient.getUserInfo();
+            //console.log('Automated script execution on behalf of', me.userName);
+
+            var retries = 0
+
+            // get and verify event context
+            //var exec_req = await fetch(`/platform/automation/v0.1/executions/${execution_id}`)
+            //var execution_obj = await exec_req.json()
+
+            // get the current execution
+            const ex = await executionsClient.getExecution({ id: execution_id });
+            console.log(`Problem ${ex.params.event['event.id']}.`)
+            if(!'event' in ex.params) { return { problem: null, affected_entities: [] } }
+
+            console.log("Loading Problem details...")
+            var probEvent = ex.params.event
+            var problem_request = {
+              problemId: probEvent['event.id'],
+              fields: 'recentComments'
+              // 'impactAnalysis, evidenceDetails'
+            }
+            var problem = await problemsClient.getProblem(problem_request);
+
+            console.log(`Problem ${problem.displayId} affects ${problem.impactedEntities.length} entities.`)
+
+            while (problem.impactedEntities.length == 0 && retries <= 10) {
+              console.log("No affected entities")
+              console.log("Waiting 5 seconds and then checking again")
+              await sleep(5000)  
+              problem = await problemsClient.getProblem(problem_request)
+              console.log(`Problem ${problem.displayId} affects ${problem.impactedEntities.length} entities.`)
+              retries += 1
+            }
+
+            if (problem.impactedEntities.length > 0) { 
+              //// load affected entities
+              //var entity_selector1 = entityId("${problem.impactedEntities.join('","')}")
+              var iE =problem.impactedEntities[0].entityId.id;
+              var entity_selector = `entityId("${iE}")`;
+              //console.log(`Entity Selector $(entity_selector)`)
+              var entities_request = {
+                entitySelector: entity_selector,
+                //fields: "+tags"
+                fields: "+tags,+fromRelationships,+toRelationships"
+              }
+              console.log(`Entities ${entities_request}`)
+              var entities = await monitoredEntitiesClient.getEntities(entities_request);
+              
+            } else { var entities = [] }
+
+
+            // Creating distributable information
+
+            var eventInfo = {
+              problemTitle: problem.title,
+          //    problemStatus: problem.status,
+              problemStatus: probEvent['event.status'],    
+              problemId: problem.displayId,
+              problemArea: problem.impactLevel,
+              problemLevel: problem.severityLevel,
+              impactedEntitiesId: problem.impactedEntities,
+              eventId: probEvent['event.id'],
+              eventStart : probEvent['event.start'],
+              eventName : probEvent['event.name'],
+              eventStatus : probEvent['event.status'],
+              rootCauseEntity : probEvent['root_cause_entity_name']
+            }
+            
+
+            //
+
+
+            
+            return { 
+                    entities,
+                    eventInfo          
+              //affected_entities: my_entities
+            };
+
+          }
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    forecast_service_load:
+      name: forecast_service_load
+      description: Execute a customizable AI/ML task using Davis® analyzers
+      action: dynatrace.davis.workflow.actions:davis-analyze
+      input:
+        body:
+          nPaths: 200
+          useModelCache: true
+          forecastOffset: 0
+          timeSeriesData: 'timeseries usage=avg(dt.host.cpu.usage), by: { dt.entity.host }
+            , filter: { in(dt.entity.host,
+            classicEntitySelector("type(host),entityName.equals(\"ip-172-31-58-105.ec2.internal\")"))
+            }'
+          forecastHorizon: 10
+          generalParameters:
+            timeframe:
+              endTime: now
+              startTime: now-4h
+            logVerbosity: WARNING
+            resolveDimensionalQueryData: false
+          coverageProbability: 0.9
+          applyZeroLowerBoundHeuristic: false
+        analyzerName: dt.statistics.GenericForecastAnalyzer
+      position:
+        x: -1
+        y: 1
+      predecessors: []
+    send_event_to_event-driven-ansible_1:
+      name: send_event_to_event-driven-ansible_1
+      description: Send an event to the Red Hat Event-Driven-Ansible Controller via
+        Event Source Plugin
+      action: dynatrace.redhat.ansible:send-event-to-eda
+      active: true
+      input:
+        eventData: '{{result("merge_event_data")}}'
+        connectionId: ""
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - merge_event_data
+      conditions:
+        states:
+          merge_event_data: OK
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: >-
+        event.kind == "DAVIS_PROBLEM" AND event.status == "ACTIVE" AND
+        (event.status_transition == "CREATED" OR event.status_transition ==
+        "UPDATED" OR event.status_transition == "REOPENED") AND (event.category
+        == "ERROR" OR event.category == "RESOURCE_CONTENTION") AND
+        (maintenance.is_under_maintenance == false and 
+
+        event.status_transition =="CREATED"
+
+
+
+        ) AND (matchesValue(entity_tags, "remediation:eda"))
+      isActive: true
+      uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
+        event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
+        "REFRESHED") else "resolved" }}-{{
+        event()["dt.davis.last_reopen_timestamp"] }}'
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            resource: true
+          entityTags:
+            remediation:
+              - eda
+          customFilter: |+
+            maintenance.is_under_maintenance == false and 
+            event.status_transition =="CREATED"
+
+
+          entityTagsMatch: all
+  schemaVersion: 3
