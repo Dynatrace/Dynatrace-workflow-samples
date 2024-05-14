@@ -1,0 +1,16 @@
+---
+-
+  hosts: localhost
+  name: "Remediate Failure rate"
+  tasks:
+    - name: Print Dynatrace ProblemId
+      debug:
+        msg: "{{ansible_eda.event.payload.eventData.eventId}}"
+      when: ansible_eda.event.payload.eventData.problemStatus == "ACTIVE"
+
+    - name: Sleep for 5 mins to activate Davis AI
+      wait_for:
+        delay: 300
+        timeout: 0
+        
+    

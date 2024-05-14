@@ -1,0 +1,17 @@
+---
+- name: Listen for events on dt_webhook
+  hosts: all
+  sources:
+    - dynatrace.event_driven_ansible.dt_webhook: #use dt_webhook as source for ansible-rulebook 
+        host: 0.0.0.0
+        port: 6008
+        token: '{{ var_eda_token }}' 
+
+  rules:
+    - name: Problem payload Dynatrace for App Failure rate increase issue
+      condition: event.payload.eventData.problemTitle is match ("Failure rate increase")
+      action:
+        run_job_template:
+          name: "your-playbook"
+          organization: "Default"
+    
