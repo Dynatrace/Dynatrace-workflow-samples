@@ -3,13 +3,13 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.automations
-        version: ^1.452.0
+        version: ^1.602.0
       - id: dynatrace.jira
-        version: ^3.1.3-dev.20240403T092917+994f1fd4
+        version: ^3.2.1-dev.20240528T144451+09b9606c
       - id: dynatrace.ownership
-        version: ^1.7.1
+        version: ^1.7.4-dev.20240528T112243+0aa225fd
       - id: dynatrace.slack
-        version: ^1.3.10-dev.20240404T075444+c182e0fd
+        version: ^1.3.12-dev.20240528T073515+c2f7489e
   inputs:
     - type: connection
       schema: app:dynatrace.jira:connection
@@ -23,7 +23,7 @@ metadata:
         - tasks.notify_if_failed.connection
         - tasks.notify_no_jira_owners.connection
 workflow:
-  title: "[Security-Demo] Critical vulnerabilities - ticket per host (Jira and Slack)"
+  title: "[Sample] Critical vulnerabilities - ticket per host (Jira and Slack)"
   tasks:
     get_owners:
       name: get_owners
@@ -400,6 +400,8 @@ workflow:
               entity.type=takeAny(affected_entity.type)
           }, by:{entity.id=related_entities.host.id}
 
+          // enrich host names
+
           | lookup [fetch dt.entity.host],
 
           sourceField:entity.id,lookupField:id, fields:{entity.name}
@@ -607,11 +609,8 @@ workflow:
         type: interval
         intervalMinutes: 60
       timezone: Europe/Vienna
-      isActive: true
+      isActive: false
       isFaulty: false
-      nextExecution: 2024-04-04T13:00:00.000Z
-      filterParameters:
-        earliestStart: 2023-08-10T00:00:00.000Z
-        earliestStartTime: 00:00
+      filterParameters: {}
       inputs: {}
   schemaVersion: 3
