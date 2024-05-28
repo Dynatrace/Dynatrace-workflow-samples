@@ -3,9 +3,9 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.automations
-        version: ^1.452.0
+        version: ^1.602.0
       - id: dynatrace.slack
-        version: ^1.3.10-dev.20240404T075444+c182e0fd
+        version: ^1.3.12-dev.20240528T073515+c2f7489e
   inputs:
     - type: connection
       schema: app:dynatrace.slack:connection
@@ -92,9 +92,8 @@ workflow:
 
           // filter for open non-muted vulnerabilities
 
-          | filter vulnerability.resolution.status=="OPEN" AND
-          vulnerability.mute.status=="NOT_MUTED"
-
+          | filter vulnerability.resolution.status=="OPEN" 
+                   AND vulnerability.mute.status=="NOT_MUTED"
           // filter for critical and high risk vulnerabilities
 
           | filter in(vulnerability.risk.level,{"CRITICAL","HIGH"})
@@ -118,6 +117,8 @@ workflow:
               affected_entity.names=collectArray(affected_entity.name)
           }, by:{entity.id=related_entities.host.id}
 
+          // enrich host name information
+
           | lookup [fetch dt.entity.host],
 
           sourceField:entity.id,lookupField:id, fields:{entity.name}
@@ -135,8 +136,6 @@ workflow:
       timezone: Europe/Vienna
       isActive: false
       isFaulty: false
-      filterParameters:
-        earliestStart: 2023-08-10T00:00:00.000Z
-        earliestStartTime: 00:00
+      filterParameters: {}
       inputs: {}
   schemaVersion: 3

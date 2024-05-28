@@ -3,7 +3,7 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.automations
-        version: ^1.452.0
+        version: ^1.602.0
   inputs: []
 workflow:
   title: "[Sample] OCSF - send critical vulnerabilities to a third-party tool"
@@ -152,7 +152,7 @@ workflow:
 
         and (vulnerability.risk.level=="CRITICAL" or
         vulnerability.risk.level=="HIGH")
-      isActive: true
+      isActive: false
       uniqueExpression: null
       triggerConfiguration:
         type: event
