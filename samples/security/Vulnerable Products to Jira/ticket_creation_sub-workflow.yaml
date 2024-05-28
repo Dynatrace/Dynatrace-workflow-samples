@@ -1,0 +1,221 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.602.0
+      - id: dynatrace.jira
+        version: ^3.2.1-dev.20240527T081635+f41f8a8b
+      - id: dynatrace.ownership
+        version: ^1.7.4-dev.20240524T120106+c474d5e8
+  inputs:
+    - type: connection
+      schema: app:dynatrace.jira:connection
+      targets:
+        - tasks.create_jira_issue.connectionId
+        - tasks.fetch_existing_jira_ticket.connectionId
+workflow:
+  title: Appsec Ticket Creation Subroutine
+  tasks:
+    create_jira_issue:
+      name: create_jira_issue
+      description: Create new Jira issue with various fields
+      action: dynatrace.jira:jira-create-issue
+      input:
+        labels: "{{ execution().input.labels }}"
+        taskId: "{{ task().id }}"
+        project: >-
+          {% if result("resolve_ownership").jira|length > 0 %}
+
+          {{ result("resolve_ownership").jira[0].jira.project }}{% else %}{{
+          "DTSEC" }}{% endif %}
+        summary: '{{ execution().input.vulnerabilityName + " found in " +
+          execution().input.assetReference}}'
+        assignee: >
+          {% if result("resolve_ownership").jira|length > 0%}
+
+          {{ result("resolve_ownership").jira[0].jira.defaultAssignee }}{% else
+          %}{{ None }}{% endif %}
+        priority: '{{ "Blocker" }}'
+        reporter:
+          id: 712020:77f4aaaa-a610-46ed-8c3c-9737e3e0d4b6
+        issueType: '{{ "Vulnerability" }}'
+        components: []
+        description: >
+          {panel}
+
+          h3. Vulnerability Details
+
+          {{execution().input.vulnerabilityDescription}}
+
+          {panel}
+
+
+          ||CVE(s)|{% if execution().input.cve is defined and
+          execution().input.cve %}{% for cveId in execution().input.cve
+          %}[{{cveId}}|https://nvd.nist.gov/vuln/detail/{{cveId}}]\\{% endfor
+          %}{% else %}None associated\\{% endif %}|
+
+          ||Snyk Id(s)|{% if execution().input.externalId is defined and
+          execution().input.externalId
+          %}[{{execution().input.externalId}}|{{execution().input.vulnUrl}}]\\{%
+          else %}None associated\\{% endif %}|
+
+          ||Dynatrace Security Problem(s)|{% if
+          execution().input.vulnerabilityIds is defined and
+          execution().input.vulnerabilityIds %}{% for vulnId in
+          execution().input.vulnerabilityIds %}{% if
+          execution().input.vulnerabilityType == "CODE_LIBRARY"
+          %}[{{execution().input.vulnerabilityDisplayIds[loop.index0]}}|{{result("get_environment_url").environmentUrl}}ui/apps/dynatrace.security.vulnerabilities/vulnerabilities/{{vulnId}}]
+          \\{% else
+          %}[{{execution().input.vulnerabilityDisplayIds[loop.index0]}}|{{result("get_environment_url").environmentUrl}}ui/apps/dynatrace.security.vulnerabilities/vulnerabilities/{{vulnId}}]
+          \\{% endif %}{% endfor %}{% else %}None associated\\{% endif %}|
+
+          ||Vulnerable Component|*{{execution().input.affects}}* \\|
+
+          ||Affected Product|{% if execution().input.product is defined and
+          execution().input.product %}*{{execution().input.product}}* {% else %}
+          Not set - (?) [How to set|https://dt-rnd.atlassian.net/l/cp/TdgtFzA7]
+          {% endif %}|
+
+        connectionId: ""
+      position:
+        x: -1
+        y: 3
+      predecessors:
+        - resolve_ownership
+        - get_environment_url
+      conditions:
+        states:
+          resolve_ownership: OK
+          get_environment_url: OK
+        custom: '{{ result("fetch_existing_jira_ticket")|length == 0 }}'
+        else: SKIP
+    resolve_ownership:
+      name: resolve_ownership
+      description: Retrieves entity and extracts ownership data from it.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: "{{ execution().input.owningEntity }}"
+        responsibilities:
+          - Development
+          - Security
+          - Operations
+          - Infrastructure
+          - Line of Business
+          - Not defined
+      position:
+        x: -1
+        y: 2
+      predecessors:
+        - fetch_existing_jira_ticket
+      conditions:
+        states:
+          fetch_existing_jira_ticket: OK
+        custom: '{{ result("fetch_existing_jira_ticket")|length == 0 }}'
+        else: SKIP
+    get_environment_url:
+      name: get_environment_url
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          import { getEnvironmentUrl } from '@dynatrace-sdk/app-environment';
+
+          export default async function () {
+            return { environmentUrl: getEnvironmentUrl() };
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors: []
+    update_tracking_link:
+      name: update_tracking_link
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >+
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { securityProblemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2";
+
+          import { getEnvironmentUrl } from '@dynatrace-sdk/app-environment';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const securityEvent = ex.input
+            const existingJiraIssueResult = await ex.result('fetch_existing_jira_ticket');
+            const createJiraIssueResult = await ex.result('create_jira_issue');
+
+            const ticketKey = existingJiraIssueResult.length == 0 
+              ? createJiraIssueResult.key 
+              : existingJiraIssueResult[0].key
+             
+              let vulnerabilityIds = securityEvent.vulnerabilityIds
+              let processGroupIds = securityEvent.affectedProcessGroups
+
+              if (securityEvent.vulnerabilityType.toUpperCase() === "CODE") {
+          	    console.warn("WARNING: Tracking link unsupported for CODE level vulnerabilities.")
+              } else if (vulnerabilityIds.length == 1) { 
+              	await updateLink(processGroupIds, ticketKey, vulnerabilityIds[0])
+                  return { url: getEnvironmentUrl() + "/ui/apps/dynatrace.security.vulnerabilities/vulnerabilities/" + vulnerabilityIds[0] + "/remediation-tracking?trackingLinkName=" + ticketKey}
+              } else {
+              	console.error("ERROR: Unsupported VulnerabilityID to affectedProcessGroup mapping!")
+              }
+          }
+
+          async function updateLink(processGroupIds, ticketKey, vulnerabilityId)
+          {  
+            console.log("Setting tracking link for ticket:" + ticketKey + " for vulnerability " + vulnerabilityId + " process groups: " + processGroupIds);
+
+            const updates = {}
+            for(let processGroupId of processGroupIds){
+              updates[processGroupId] = {
+                url : "<jira-base-url>/browse/" + ticketKey,
+                displayName : ticketKey
+              }
+            }
+            
+            try {
+              const data = await securityProblemsClient.trackingLinkBulkUpdateAndDelete({
+                        id: vulnerabilityId,
+                        body: { updates }
+                      }); 
+            } catch(error) {
+              console.error(error)
+            }
+          }
+
+      position:
+        x: -1
+        y: 4
+      predecessors:
+        - create_jira_issue
+        - fetch_existing_jira_ticket
+      conditions:
+        states:
+          create_jira_issue: OK
+          fetch_existing_jira_ticket: SUCCESS
+    fetch_existing_jira_ticket:
+      name: fetch_existing_jira_ticket
+      description: Execute JQL queries to fetch issues from Jira
+      action: dynatrace.jira:jira-jql-search
+      input:
+        jql: "{{\"labels = 'product-\" + execution().input.assetReference + \"' AND
+          labels = 'vulnId-\" + execution().input.vulnerabilityReference + \"'
+          AND labels = 'appsec-workflow'\"}}"
+        expand: []
+        fields:
+          - key
+        maxResults: 1
+        connectionId: ""
+      position:
+        x: -1
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+  description: ""
+  trigger: {}
+  schemaVersion: 3

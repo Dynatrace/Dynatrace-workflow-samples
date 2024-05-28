@@ -1,0 +1,158 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.602.0
+  inputs: []
+workflow:
+  title: AppSec Trigger Workflow
+  tasks:
+    query_security_events:
+      name: query_security_events
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: >-
+          fetch events, from:now() - 45m
+            | filter event.provider=="Dynatrace"
+            | filter dt.system.bucket=="default_security_events"
+            | filter event.kind == "SECURITY_EVENT"
+            | filter event.category == "VULNERABILITY_MANAGEMENT"
+            | filter event.type == "VULNERABILITY_STATE_REPORT_EVENT"
+            | filter event.level == "ENTITY"
+            | filter vulnerability.resolution.status=="OPEN"
+            | filter vulnerability.mute.status == "NOT_MUTED"
+            | filter in(vulnerability.stack, {"SOFTWARE", "CODE_LIBRARY", "CODE"})
+            | filter event.status == "OPEN"
+            | filter in(vulnerability.parent.risk.level, {"CRITICAL", "HIGH"})
+
+            // expand to get vulnerabilities per PGI
+            | expand affected_entity.affected_processes.ids
+            | dedup { affected_entity.affected_processes.ids, vulnerability.id }, sort: { timestamp desc }
+            
+            // joining on process group instances
+            | join [
+              fetch dt.entity.process_group_instance, from:now() - 2h
+                | fieldsAdd tags
+                | fieldsAdd t = toString(tags)
+                | fieldsAdd releasesProduct
+                | parse t, "LD 'owner\\\\\\\\: ' LD:ownerTag (':'|'\"') LD"
+            ], kind:leftOuter, on:{left[affected_entity.affected_processes.ids] == right[id]}, prefix:"pgi."
+            
+            // joining on container group instances to get to cloud application
+            | expand pgi.belongs_to[dt.entity.container_group_instance]
+            | join [
+              fetch dt.entity.container_group_instance
+               | fieldsAdd cloud_application_id = belongs_to[dt.entity.cloud_application]
+            ], kind:leftOuter, on:{left[`pgi.belongs_to[dt.entity.container_group_instance]`] == right[id]}, prefix:"cgi."
+            
+            // joining on cloud applications
+            | join [
+              fetch dt.entity.cloud_application
+                | fieldsAdd labels = cloudApplicationLabels, t = toString(tags)
+                | parse t,"LD 'owner\\\\\\\\: ' LD:ownerTag (':'|'\"') LD"
+            ], kind:leftOuter, on:{left[cgi.cloud_application_id] == right[id]}, prefix:"ca."
+            
+            // parsing product
+            | fieldsAdd product = If(isNotNull(ca.cloudApplicationLabels[`app.kubernetes.io/name`]), lower(ca.cloudApplicationLabels[`app.kubernetes.io/name`]),
+              else: if(isNotNull(pgi.releasesProduct), lower(pgi.releasesProduct),
+                else: lower(ca.cloudApplicationLabels[`app.kubernetes.io/part-of`])))
+            
+            // add owning Entity id which is needed for owner resolution
+            | fieldsAdd owningEntity = pgi.id
+            
+            // vulnerability deduplication field (jira_label)
+            | fieldsAdd vulnerabilityReference = if (upper(vulnerability.stack)=="CODE", vulnerability.title, else:vulnerability.id)
+            | fieldsAdd vulnerabilityReference = replaceString(trim(vulnerabilityReference), " ", "_") // can't have blanks in jira labels
+            
+            // asset deduplication field, use PG name to get fallback asset (jira_label)
+            | fieldsAdd assetReference = if(isNull(product), concat("pg-", arrayFirst(splitString(affected_entity.name, " "))),
+            else:product)
+            | fieldsAdd assetReference = replaceString(trim(assetReference), " ", "_") // can't have blanks in jira labels
+            
+            // create vulnerabilityName used in title to work with various vulnerability types ("SOFTWARE", "CODE_LIBRARY", "CODE")
+            | fieldsAdd vulnerabilityName = if (upper(vulnerability.stack)=="CODE", vulnerability.title, else:vulnerability.external_id)
+
+            
+            | summarize {
+              score=takeFirst(vulnerability.cvss.base_score),
+              severity=upper(takeFirst(vulnerability.parent.risk.level)),
+              vulnUrl=takeFirst(vulnerability.external_url),
+              component=takeFirst(affected_entity.vulnerable_component.short_name),
+              codeLocation=takeFirst(vulnerability.code_location.name),
+              cve=takeFirst(vulnerability.references.cve),
+              owner=takeFirst(owner),
+              owningEntity = takeFirst(owningEntity),
+              vulnerabilityType=takeFirst(vulnerability.stack),
+              vulnerabilityDescription=takeFirst(vulnerability.description),
+              externalId=takeFirst(vulnerability.external_id),
+              vulnerabilityIds=collectDistinct(vulnerability.id),
+              product=takeFirst(product),
+              vulnerabilityDisplayIds=collectDistinct(vulnerability.display_id),
+              vulnerabilityName=takeFirst(vulnerabilityName),
+              affectedProcessGroups=collectDistinct(affected_entity.id) // -> needed for tracking links
+            }, by:{assetReference, vulnerabilityReference}
+            | filter isNotNull(assetReference) AND isNotNull(vulnerabilityReference)
+            | fields assetReference, product, owner, owningEntity, score, severity, cve, externalId, vulnerabilityReference, vulnerabilityIds, component, codeLocation, affectedProcessGroups, vulnUrl, vulnerabilityType, vulnerabilityDescription, vulnerabilityDisplayIds, vulnerabilityName
+            | fieldsAdd affects = if(isNull(component), codeLocation, else: component)
+            | fieldsAdd labels = arrayRemoveNulls(arrayConcat(array("appsec-workflow",concat("product-",assetReference),concat("vulnId-",vulnerabilityReference), externalId), cve))
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    trigger_ticket_creation:
+      name: trigger_ticket_creation
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { workflowsClient } from "@dynatrace-sdk/client-automation";
+
+          import { actionExecutionsClient } from
+          "@dynatrace-sdk/client-automation";
+
+          import { getEnvironmentUrl } from '@dynatrace-sdk/app-environment';
+
+          export default async function ({execution_id, action_execution_id}) {
+
+            const actionExecution =
+            await actionExecutionsClient.getActionExecution({
+              id: action_execution_id,
+            });
+
+            const record = actionExecution.loopItem.item
+
+            const result = await workflowsClient.runWorkflow({
+              id: "<sub-workflow-id>",
+              body: {input: record},
+              });
+
+            return `${getEnvironmentUrl()}/ui/apps/dynatrace.automations/executions/${result.id}`
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - query_security_events
+      conditions:
+        states:
+          query_security_events: OK
+      concurrency: 1
+      withItems: item in {{ result("query_security_events").records }}
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: interval
+        intervalMinutes: 30
+      timezone: Europe/Vienna
+      isActive: true
+      isFaulty: false
+      nextExecution: 2024-05-28T11:30:00.000Z
+      filterParameters:
+        earliestStart: 2024-05-22
+        earliestStartTime: 00:00
+      inputs: {}
+  schemaVersion: 3
