@@ -3,9 +3,9 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.automations
-        version: ^1.452.0
+        version: ^1.602.0
       - id: dynatrace.msteams
-        version: ^0.3.12-dev.20240404T064314+07ade937
+        version: ^0.3.14-dev.20240528T082630+b82181ff
   inputs:
     - type: connection
       schema: app:dynatrace.msteams:connection
@@ -274,8 +274,6 @@ workflow:
       timezone: Europe/Vienna
       isActive: false
       isFaulty: false
-      filterParameters:
-        earliestStart: 2023-08-10T00:00:00.000Z
-        earliestStartTime: 00:00
+      filterParameters: {}
       inputs: {}
   schemaVersion: 3
