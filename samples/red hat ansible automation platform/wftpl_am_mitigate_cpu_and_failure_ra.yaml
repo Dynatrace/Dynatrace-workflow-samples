@@ -3,15 +3,15 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.automations
-        version: ^1.507.4
+        version: ^1.602.0
       - id: dynatrace.davis.workflow.actions
-        version: ^1.1.7
+        version: ^1.2.0
       - id: dynatrace.ownership
-        version: ^1.7.1
+        version: ^1.7.2
       - id: dynatrace.redhat.ansible
         version: ^0.2.4
       - id: dynatrace.slack
-        version: ^1.3.9
+        version: ^1.3.11
   inputs:
     - type: connection
       schema: app:dynatrace.redhat.ansible:eda-webhook.connection
@@ -22,7 +22,7 @@ metadata:
       targets:
         - tasks.send_message.connection
 workflow:
-  title: (AM) Mitigate CPU and failure rate with RH Event Driven Ansible
+  title: (AM Demo) Mitigate CPU and failure rate with RH Event Driven Ansible
   tasks:
     meta_data:
       name: meta_data
@@ -60,6 +60,7 @@ workflow:
       name: send_message
       description: Send a message to a Slack workspace
       action: dynatrace.slack:slack-send-message
+      active: true
       input:
         channel: '{{ result("get_owners").slackChannels[0].slackChannel }}'
         message: >-
@@ -119,9 +120,11 @@ workflow:
       description: Build a custom task running js Code
       action: dynatrace.automations:run-javascript
       input:
-        script: |-
+        script: >-
           // optional import of sdk modules
+
           import { execution } from '@dynatrace-sdk/automation-utils';
+
 
           export default async function ({ execution_id }) {
             // your code goes here
@@ -138,9 +141,13 @@ workflow:
             
             const exprediction = await ex.result("extract_prediction");
             const obj2 = {
-              cpu_forecast: exprediction.prediction 
+              recommended_cpu_forecast: exprediction.prediction 
             }
 
+            const entityDetails = await ex.result("get_entity_details");
+            
+            const serviceLoad = await ex.result("forecast_service_load");
+            
             const owners = await ex.result("get_owners");
             const email = {
               email: owners.email
@@ -149,12 +156,8 @@ workflow:
              slack: owners.slackChannels
            }
             
-            let result  = Object.assign(obj1,obj2,slack, email)
+            let result  = Object.assign(obj1, obj2, entityDetails, serviceLoad, slack, email)
             console.log(result); 
-            
-          //  obj.push(predData);
-          //  const json = JSON.stringify(obj);
-          //  console.log (json);
             
             return result;
           }
@@ -206,12 +209,47 @@ workflow:
 
       position:
         x: -1
-        y: 2
+        y: 3
       predecessors:
         - forecast_service_load
       conditions:
         states:
           forecast_service_load: OK
+    get_entity_details:
+      name: get_entity_details
+      description: Build a custom task running js Code
+      action: dynatrace.automations:run-javascript
+      active: true
+      input:
+        script: >-
+          // optional import of sdk modules
+
+          import { executionsClient } from '@dynatrace-sdk/client-automation';
+
+          import { monitoredEntitiesClient } from
+          '@dynatrace-sdk/client-classic-environment-v2';
+
+
+          export default async function ({ execution_id }) {
+            // your code goes here
+
+            // get the current execution
+            const ex = await executionsClient.getExecution({ id: execution_id });
+            var myEntityID = ex.params.event['affected_entity_ids']
+            console.log(myEntityID);
+            
+            var entity_selector =  myEntityID[0];
+            console.log(entity_selector);
+            
+            var entity = await monitoredEntitiesClient.getEntity({entityId : entity_selector });
+            
+            console.log(entity);
+            return { entity };
+          }
+      position:
+        x: -1
+        y: 1
+      predecessors: []
     get_problem_details:
       name: get_problem_details
       description: Build a custom task running js Code
@@ -326,15 +364,16 @@ workflow:
       name: forecast_service_load
       description: Execute a customizable AI/ML task using Davis® analyzers
       action: dynatrace.davis.workflow.actions:davis-analyze
+      active: true
       input:
         body:
           nPaths: 200
           useModelCache: true
           forecastOffset: 0
-          timeSeriesData: 'timeseries usage=avg(dt.host.cpu.usage), by: { dt.entity.host }
+          timeSeriesData: "timeseries usage=avg(dt.host.cpu.usage), by: { dt.entity.host }
             , filter: { in(dt.entity.host,
-            classicEntitySelector("type(host),entityName.equals(\"ip-172-31-58-105.ec2.internal\")"))
-            }'
+            classicEntitySelector(\"type(host),entityName.equals(\\\"{{result('\
+            get_entity_details')['entity']['displayName']}}\\\")\"))}"
           forecastHorizon: 10
           generalParameters:
             timeframe:
@@ -347,8 +386,12 @@ workflow:
         analyzerName: dt.statistics.GenericForecastAnalyzer
       position:
         x: -1
-        y: 1
-      predecessors: []
+        y: 2
+      predecessors:
+        - get_entity_details
+      conditions:
+        states:
+          get_entity_details: OK
     send_event_to_event-driven-ansible_1:
       name: send_event_to_event-driven-ansible_1
       description: Send an event to the Red Hat Event-Driven-Ansible Controller via
