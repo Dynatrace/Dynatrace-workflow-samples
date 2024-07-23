@@ -5,7 +5,7 @@ metadata:
       - id: dynatrace.automations
         version: ^1.602.0
       - id: dynatrace.servicenow
-        version: ^0.8.1-dev.20240528T114637+856776b4
+        version: ^0.9
   inputs:
     - type: connection
       schema: app:dynatrace.servicenow:connection
