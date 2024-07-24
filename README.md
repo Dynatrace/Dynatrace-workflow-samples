@@ -4,17 +4,21 @@ This repository collects sample workflows and javascripts snippets for Dynatrace
 
 ## Getting Started with Dynatrace AutomationEngine
 
-To get started refer to the [Dynatrace AutomationEngine](https://www.dynatrace.com/support/help/shortlink/automationengine) and [Workflows](https://www.dynatrace.com/support/help/shortlink/workflows) documentation.
+To get started please have a look into [Dynatrace AutomationEngine](https://www.dynatrace.com/support/help/shortlink/automationengine) and [Workflows](https://www.dynatrace.com/support/help/shortlink/workflows) documentation.
 
 
 ## License
 [Apache License v2.0](LICENSE).
 
+
 ## How to leverage workflow and code samples
 ### Workflow import
 
-You can import a workflow via API, via workflow UI (coming soon) or via Monaco (coming soon). 
-For further information on how to import a workflow see [README.md](howtoimportexport/readme.md) 
+You can export and import a workflow via
+- [JSON via API](https://github.com/Dynatrace/Dynatrace-workflow-samples/tree/main/howtoimportexport) 
+- JSON or template YAML via [Workflows App UI](https://docs.dynatrace.com/docs/shortlink/workflows-manage)
+- [Configuration-as-Code (Monaco / Terraform)](https://docs.dynatrace.com/docs/shortlink/configuration-as-code)
+  -- Be aware, that the files are not compatible, as Monaco JSONs contain escaping and uses another YAML format to fill placeholders.
 
 ### Code snippets
 Within a workflow, click on "new task", select "Run Javascript" and copy/paste the snippet into the Javascript action.
@@ -24,11 +28,11 @@ Within a workflow, click on "new task", select "Run Javascript" and copy/paste t
 
 ### Export a workflow
 
-You can export a workflow via API, via workflow UI (coming soon) or via Monaco (coming soon). 
-For further information on how to export a workflow see [README.md](howtoimportexport/readme.md) 
+Export your workflow as a template and make sure that you have no secrets in the resulting file.
+Also make sure you have the proper versions of depending apps referenced within the file. Use generally available versions and no dev version of any app that you used in the environment.
 
 ### Create a pull request and upload your contribution 
-Create a pull request and upload your contribution to /samples/CATEGORY. 
+Create a pull request and upload your contribution to /samples/Optional category subfolder/...
 
 
 
