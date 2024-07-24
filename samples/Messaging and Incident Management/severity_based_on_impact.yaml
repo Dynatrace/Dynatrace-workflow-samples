@@ -1,0 +1,278 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.700.0
+      - id: dynatrace.servicenow
+        version: ^0.9.0
+      - id: dynatrace.slack
+        version: ^1.3.12
+  inputs:
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.create_incident_1.connectionId
+    - type: connection
+      schema: app:dynatrace.slack:connection
+      targets:
+        - tasks.send_message_1.connection
+workflow:
+  title: "[CKR] SNOW Problem Severity Example"
+  tasks:
+    send_message_1:
+      name: send_message_1
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      active: false
+      input:
+        channel: C06G95Z34MU
+        message: >
+          :alert: *{{ event()["event.name"] }} ({{ event()["event.kind"]}}, {{
+          event()["event.category"]}})* :alert:
+
+
+          - Details:
+          https://xxxx.apps.dynatrace.com/ui/apps/dynatrace.davis.problems/problem/{{
+          event()["event.id"]}}
+
+          - Problem Details (Classic):
+          https://xxxx.apps.dynatrace.com/ui/apps/dynatrace.classic.problems/#problems/problemdetails;pid={{
+          event()["event.id"]}}
+
+          - Estimated severity: {{ result("estimate_problem_severity") }}
+
+          - Estimated Affected users {{
+          result("get_problem_impact")["estimatedAffectedUsers"] }}
+
+          - Impacted entities: {{
+          result("get_problem_impact")["numImpactedEntities"] }}
+
+          - Affected entities: {{
+          result("get_problem_impact")["numAffectedEntities"] }}
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: id
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - estimate_problem_severity
+      conditions:
+        states:
+          estimate_problem_severity: OK
+    create_incident_1:
+      name: create_incident_1
+      description: Create an incident in ServiceNow
+      action: dynatrace.servicenow:snow-create-incident
+      input:
+        group:
+          id: 477a05d153013010b846ddeeff7b1225
+          displayName: App Engine Admins
+        caller: dt_demo
+        impact: "3"
+        urgency: '{{ result("estimate_problem_severity") }}'
+        category: inquiry
+        description: "Event details: {{ event() }}"
+        subCategory: internal application
+        connectionId: ""
+        correlationId: DT_{{ event()["event.id"] }}
+        shortDescription: '{{ event()["event.category"] }} {{ event()["event.name"] }}'
+      position:
+        x: 1
+        y: 3
+      predecessors:
+        - estimate_problem_severity
+      conditions:
+        states:
+          estimate_problem_severity: OK
+    get_problem_impact:
+      name: get_problem_impact
+      description: Returns the problem impact
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { problemsClient } from
+          '@dynatrace-sdk/client-classic-environment-v2';
+
+
+          export default async function ({ execution_id }) {
+            // get execution and event from execution (assuming this code runs with a Davis Problem Trigger)
+            const ex = await execution(execution_id);
+            const davisEvent = ex.event();
+            /** Example: {
+              "event.id": "-1612920186620964634_1721382540000V2",
+              timestamp: "2024-07-19T09:55:58.917000000Z",
+              display_id: "P-240733209",
+              "event.kind": "DAVIS_PROBLEM",
+              "event.name": "Response time degradation",
+              entity_tags: [],
+              "event.start": "2024-07-19T09:54:00.000000000Z",
+              "event.status": "ACTIVE",
+              "event.category": "SLOWDOWN",
+              "dt.davis.event_ids": [ "-1612920186620964634_1721382540000" ],
+              affected_entity_ids: [ "SERVICE-XXXXXXXXXX" ],
+              "dt.davis.mute.status": "NOT_MUTED",
+              affected_entity_types: [ "dt.entity.service" ],
+              "dt.davis.is_duplicate": false,
+              "event.status_transition": "UPDATED",
+              "dt.davis.is_frequent_event": false,
+              "maintenance.is_under_maintenance": false
+            }*/
+
+            // get problem details
+            const problemDetails = await problemsClient.getProblem(
+              {problemId: davisEvent['event.id'], fields: 'impactAnalysis'}
+            );
+            /** contains
+            * affectedEntities
+            * displayId
+            * endTime
+            * entityTags
+            * impactAnalysis
+            *** impacts: [{estimatedAffectedUsers, impactType, impactedEntity: {entityId, name}}}
+            * impactLevel (e.g., SERVICES)
+            * impactedEntities: [{ entitityId, name }]
+            * managementZones
+            * problemFilters
+            * problemId
+            * severityLevel (e.g., PERFORMANCE)
+            * startTime
+            * status (e.g., CLOSED)
+            * title
+            **/
+            console.log(problemDetails);  
+            // collect estimatedAffectedUsers
+            let estimatedAffectedUsers = 0;
+
+            
+
+            problemDetails.impactAnalysis.impacts.forEach(
+              (impact) => {
+                estimatedAffectedUsers += impact.estimatedAffectedUsers;  
+              }
+            );
+
+            return {
+              problemId: problemDetails.problemId,
+              problemTitle: problemDetails.title,
+              problemStatus: problemDetails.status,
+              affectedEntities: problemDetails.affectedEntities,
+              numAffectedEntities: problemDetails.affectedEntities.length,
+              impactLevel: problemDetails.impactLevel, 
+              impactedEntities: problemDetails.impactedEntities, 
+              numImpactedEntities: problemDetails.impactedEntities.length,
+              severityLevel: problemDetails.severityLevel,
+              estimatedAffectedUsers: estimatedAffectedUsers
+            };
+          }
+      customSampleResult:
+        problemId: -1612920186620964634_1721382540000V2
+        impactLevel: SERVICES
+        problemTitle: Response time degradation
+        problemStatus: CLOSED
+        severityLevel: PERFORMANCE
+        affectedEntities:
+          - name: ruxitdb
+            entityId:
+              id: SERVICE-D1234
+              type: SERVICE
+        impactedEntities:
+          - name: ruxitdb
+            entityId:
+              id: SERVICE-D1234
+              type: SERVICE
+        numAffectedEntities: 1
+        numImpactedEntities: 1
+        estimatedAffectedUsers: 8
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    estimate_problem_severity:
+      name: estimate_problem_severity
+      description: Estimate problem severity based on impacted and affected entities/user
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const problemImpact = await ex.result("get_problem_impact");
+            console.log(problemImpact);
+            /** Example:
+            {
+            "problemId": "-1612920186620964634_1721382540000V2",
+            "impactLevel": "SERVICES",
+            "problemTitle": "Response time degradation",
+            "problemStatus": "CLOSED",
+            "severityLevel": "PERFORMANCE",
+            "affectedEntities": [],
+            "impactedEntities": [],
+            "numAffectedEntities": 1,
+            "numImpactedEntities": 1,
+            "estimatedAffectedUsers": 8
+          }
+
+          */
+
+            // feel free to fine-tune below
+            if (problemImpact.estimatedAffectedUsers >= 5) {
+              return "1"; // 1 - High
+            }
+
+            if (problemImpact.numAffectedEntities >= 2 || problemImpact.numImpactedEntities >= 2 || problemImpact.estimatedAffectedUsers >= 2) {
+              return "2"; // 2 - Medium
+            }
+
+            /*if (problemImpact.numAffectedEntities >= 1 || problemImpact.numImpactedEntities >= 1 || problemImpact.estimatedAffectedUsers >= 1) {
+              return "2";
+            }*/
+
+            // Default:
+            return "1"; // 1 - Low
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_problem_impact
+      conditions:
+        states:
+          get_problem_impact: OK
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: event.kind == "DAVIS_PROBLEM" AND event.status == "ACTIVE" AND
+        (event.status_transition == "CREATED" OR event.status_transition ==
+        "UPDATED" OR event.status_transition == "REOPENED") AND (event.category
+        == "MONITORING_UNAVAILABLE" OR event.category == "AVAILABILITY" OR
+        event.category == "ERROR" OR event.category == "SLOWDOWN" OR
+        event.category == "RESOURCE_CONTENTION" OR event.category ==
+        "CUSTOM_ALERT")
+      isActive: false
+      uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
+        event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
+        "REFRESHED") else "resolved" }}-{{
+        event()["dt.davis.last_reopen_timestamp"] }}'
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            custom: true
+            resource: true
+            slowdown: true
+            availability: true
+            monitoringUnavailable: true
+  schemaVersion: 3
