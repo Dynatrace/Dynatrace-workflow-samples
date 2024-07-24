@@ -19,11 +19,7 @@
 - Use <GET> /workflows respectively <GET> /workflows/{id} to export one or all workflows. You can find example http calls in [examples.txt](examples.txt)
 - Alternativately you can import the workflow [export_all_wf.json](export_all_wf.json), which allows you to export workflows via a workflow
 
-## Import or export via Workflow UI 
+## Import or export via Workflow UI, Monaco or Terraform
 
-cooming soon
-
-## Import or export via Monaco
-
-cooming soon
+Please check out the links in https://github.com/Dynatrace/Dynatrace-workflow-samples/blob/main/README.md 
 
