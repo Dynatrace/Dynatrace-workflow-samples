@@ -18,7 +18,7 @@ metadata:
       targets:
         - tasks.send_message_1.connection
 workflow:
-  title: "[CKR] SNOW Problem Severity Example"
+  title: "SNOW Problem Severity Example"
   tasks:
     send_message_1:
       name: send_message_1
