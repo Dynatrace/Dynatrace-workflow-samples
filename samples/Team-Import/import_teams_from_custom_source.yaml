@@ -34,7 +34,7 @@ workflow:
       input:
         script: >-
           const apiUrl =
-          'https://raw.githubusercontent.com/Dynatrace/Dynatrace-workflow-samples/main/samples/Ownership/Team-Import/example-teams.json';
+          'https://raw.githubusercontent.com/Dynatrace/Dynatrace-workflow-samples/main/samples/Team-Import/example-teams.json';
 
 
           export default async function ({ execution_id }) {
