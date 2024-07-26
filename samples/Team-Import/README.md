@@ -1,6 +1,6 @@
 # Ownership Team Imports Templates
 
-Within this directory, you'll find templates designed for importing Ownership teams through Workflows. Our data sources for this process include Microsoft Entra ID, ServiceNow and a custom file hosted on GitHub.
+Within this directory, you'll find templates designed for importing Ownership teams through workflows. Our data sources for this process include Microsoft Entra ID, ServiceNow and a custom file hosted on GitHub.
 
 For a comprehensive guide on how to utilize workflows for importing new teams, please refer to the [product documentation](https://docs.dynatrace.com/docs/manage/ownership/ownership-teams#import-teams). This documentation also contains detailed information about the specific [workflow action `import_teams`](https://docs.dynatrace.com/docs/manage/ownership/ownership-app#import-teams).
 
