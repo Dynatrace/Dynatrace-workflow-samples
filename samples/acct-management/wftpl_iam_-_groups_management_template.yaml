@@ -1,0 +1,292 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.798.0
+  inputs: []
+workflow:
+  title: IAM - Groups Management
+  tasks:
+    env_var:
+      name: env_var
+      description: Setup variables to generate bearer token and task variables
+      action: dynatrace.automations:run-javascript
+      active: true
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { credentialVaultClient } from
+          '@dynatrace-sdk/client-classic-environment-v2';
+
+
+          export default async function ({ execution_id }) {
+            const productionID = "<REPLACE-PLACEHOLDER>"
+            const npID = "<REPLACE-PLACEHOLDER>"
+              
+            const UUID = "<REPLACE-PLACEHOLDER>"
+            // parameterized policy uuid
+            const paramPolicy = "<REPLACE-PLACEHOLDER>"
+            const oAuthClientID = "<REPLACE-PLACEHOLDER>"
+            // credential Valut id that stores the client secret
+            const client_secret_vault_id = "CREDENTIALS_VAULT-<REPLACE-PLACEHOLDER>"
+            const iamURL = "https://api.dynatrace.com/iam/v1/accounts"
+
+            // retriving client secret from credential vault
+            const oAuthClientSecret = await credentialVaultClient.getCredentialsDetails({
+              id: client_secret_vault_id,
+            }).then((credentials) => credentials.token);
+
+
+            // set the form values and encode them
+            const grant_type = encodeURIComponent("client_credentials");
+            const client_id = encodeURIComponent(oAuthClientID);
+            const client_secret = encodeURIComponent(oAuthClientSecret);
+            
+            // set the fetch() api parameters [method, headers, body]
+            const options = {
+            method: "POST",
+            headers: {
+              'content-type': "application/x-www-form-urlencoded",
+            },
+              body: "grant_type=" + grant_type + "&client_id=" + client_id + "&client_secret=" + client_secret + "&resource=urn:dtaccount:" + UUID 
+            };
+            
+            // execute the fetch() api call
+            const resp = await fetch("https://sso.dynatrace.com/sso/oauth2/token",options);
+
+            var bearer_token = "";
+            if (resp.status == 200) {
+              const resp_json = await resp.json();
+              bearer_token = await resp_json['access_token'];
+            } 
+            else {
+              console.log(resp);
+            }
+            
+            return { 
+              iamURL,
+              productionID,
+              npID,
+              UUID,
+              paramPolicy,
+              oAuthClientID,
+              oAuthClientSecret,
+              bearer_token,
+            };
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors: []
+    create_groups:
+      name: create_groups
+      description: Create SAML/Local Group
+      action: dynatrace.automations:http-function
+      active: true
+      input:
+        url: https://api.dynatrace.com/iam/v1/accounts/{{result("env_var").UUID}}/groups
+        method: POST
+        headers:
+          Accept: application/json
+          Authorization: Bearer {{ result("env_var").bearer_token}}
+        payload: '{{ result("groups_definition").groups_payload}}'
+        failOnResponseCodes: 400-599
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - env_var
+      conditions:
+        states:
+          env_var: OK
+    groups_definition:
+      name: groups_definition
+      description: SAML Group Definition with parameters for granular Access Mangement
+      action: dynatrace.automations:run-javascript
+      active: true
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+           
+          export default async function ({ execution_id }) {
+            //-- Group being created--//
+            const groups_payload = 
+              [
+                {
+                  "name": "<REPLACE PLACEHOLDER>",
+                  "owner": "SAML",
+                  "description": "<REPLACE PLACEHOLDER>",
+                  "federatedAttributeValues": [
+                      "<REPLACE PLACEHOLDER>"
+                    ]
+                }
+              ]
+            //-- Group Parameters for the above group--//
+            //-- Provide the management-zones and hostgroups value --//
+            //-- Chnage the parameters to match your parameterized policy --//
+            
+            //-- NonProd Tenant --//
+            const group_parameters_np = {
+              "parameters": {
+                  "mz-name": "<REPLACE PLACEHOLDER>",
+                  "hg-name": "<REPLACE PLACEHOLDER>"
+                }
+            }
+            //-- Production Tenant --//
+            const group_parameters_production = {
+              "parameters": {
+                  "mz-name": "<REPLACE PLACEHOLDER>",
+                  "hg-name": "<REPLACE PLACEHOLDER>"
+                }
+            }
+            
+            return { 
+              groups_payload,
+              group_parameters_np,
+              group_parameters_production
+            };
+          }
+      position:
+        x: -1
+        y: 2
+      predecessors: []
+    bind_group_policies_np:
+      name: bind_group_policies_np
+      description: Bind NonProd default policies
+      action: dynatrace.automations:http-function
+      active: true
+      input:
+        url: https://api.dynatrace.com/iam/v1/repo/environment/{{result("env_var").npID}}/bindings/groups/{{_.item.uuid}}
+        method: PUT
+        headers:
+          Accept: application/json
+          Authorization: Bearer {{ result("env_var").bearer_token}}
+        payload: |-
+          {
+              "policyUuids": [
+                  "<REPLACE PLACEHOLDER>"
+              ]
+          }
+        failOnResponseCodes: 400-599
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - create_groups
+      conditions:
+        states:
+          create_groups: OK
+      concurrency: 20
+      withItems: item in {{result("create_groups")["json"]}}
+    assign_new-groups_permissions:
+      name: assign_new-groups_permissions
+      description: This will add support ticket management role-based permission.
+        Policy is not available for this yet.
+      action: dynatrace.automations:http-function
+      active: true
+      input:
+        url: https://api.dynatrace.com/iam/v1/accounts/{{result("env_var").UUID}}/groups/{{_.item.uuid}}/permissions
+        method: POST
+        headers:
+          Accept: application/json
+          Authorization: Bearer {{ result("env_var").bearer_token}}
+        payload: |
+          [
+              {
+                  "permissionName": "tenant-manage-support-tickets",
+                  "scope": "<REPLACE PLACEHOLDER>",
+                  "scopeType": "tenant"
+              },
+              {
+                  "permissionName": "tenant-manage-support-tickets",
+                  "scope": "<REPLACE PLACEHOLDER>",
+                  "scopeType": "tenant"
+              }
+          ]
+      position:
+        x: -1
+        y: 4
+      predecessors:
+        - create_groups
+      conditions:
+        states:
+          create_groups: OK
+      concurrency: 20
+      withItems: item in {{result("create_groups")["json"]}}
+    bind_parametrized_policies_np:
+      name: bind_parametrized_policies_np
+      description: Bind NonProd parameterized policy permission
+      action: dynatrace.automations:http-function
+      input:
+        url: https://api.dynatrace.com/iam/v1/repo/environment/{{result("env_var").npID}}/bindings/{{result("env_var").paramPolicy}}/{{_.item.uuid}}
+        method: POST
+        headers:
+          Accept: application/json
+          Authorization: Bearer {{ result("env_var").bearer_token}}
+        payload: '{{ result("groups_definition").group_parameters_np}}'
+        failOnResponseCodes: 400-599
+      position:
+        x: 0
+        y: 5
+      predecessors:
+        - bind_group_policies_np
+      conditions:
+        states:
+          bind_group_policies_np: OK
+      concurrency: 1
+      withItems: item in {{result("create_groups")["json"]}}
+    bind_group_policies_production:
+      name: bind_group_policies_production
+      description: Bind Production default policies
+      action: dynatrace.automations:http-function
+      active: true
+      input:
+        url: https://api.dynatrace.com/iam/v1/repo/environment/{{result("env_var").productionID}}/bindings/groups/{{_.item.uuid}}
+        method: PUT
+        headers:
+          Accept: application/json
+          Authorization: Bearer {{ result("env_var").bearer_token}}
+        payload: |-
+          {
+              "policyUuids": [
+                  "<REPLACE PLACEHOLDER>",
+              ]
+          }
+        failOnResponseCodes: 400-599
+      position:
+        x: 1
+        y: 4
+      predecessors:
+        - create_groups
+      conditions:
+        states:
+          create_groups: OK
+      concurrency: 20
+      withItems: item in {{result("create_groups")["json"]}}
+    bind_parametrized_policies_production:
+      name: bind_parametrized_policies_production
+      description: Bind Production parameterized policy permission
+      action: dynatrace.automations:http-function
+      input:
+        url: https://api.dynatrace.com/iam/v1/repo/environment/{{result("env_var").productionID}}/bindings/{{result("env_var").paramPolicy}}/{{_.item.uuid}}
+        method: POST
+        headers:
+          Accept: application/json
+          Authorization: Bearer {{ result("env_var").bearer_token}}
+        payload: '{{ result("groups_definition").group_parameters_production}}'
+        failOnResponseCodes: 400-599
+      position:
+        x: 1
+        y: 5
+      predecessors:
+        - bind_group_policies_production
+      conditions:
+        states:
+          bind_group_policies_production: OK
+      concurrency: 1
+      withItems: item in {{result("create_groups")["json"]}}
+  description: ""
+  trigger: {}
+  schemaVersion: 3
