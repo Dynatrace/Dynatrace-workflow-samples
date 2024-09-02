@@ -12,7 +12,7 @@ The example aims to offer a minimal yet self-contained workflow that utilizes AW
 
 ### Setup AWS using a CloudFormation template
 The provided CloudFormation template assists in the [setup](https://docs.dynatrace.com/docs/platform-modules/automations/workflows/actions/aws/aws-workflows-setup) of your AWS environment.
-Specifically, Step 3 of the documentation outlines how to set up your AWS environment, including the provisioning of an Identity Provider and a Role in [AWS IAM](https://docs.aws.amazon.com/iam/).
+Specifically, Step 2 of the documentation outlines how to set up your AWS environment, including the provisioning of an Identity Provider and a Role in [AWS IAM](https://docs.aws.amazon.com/iam/).
 You can automate the provisioning of these resources using the CloudFormation template found in `cloudformation_store_bizevents_in_s3_bucket.json`.
 This template defines two resources:
 1. An Identity Provider in [AWS IAM](https://docs.aws.amazon.com/iam/) that allows for identities issued by `https://token.dynatrace.com`.
@@ -25,7 +25,7 @@ To create a new CloudFormation stack using the provided template, use the [AWS C
 aws cloudformation create-stack --stack-name dynatrace-s3-workflow-example --template-url https://https://raw.githubusercontent.com/Dynatrace/Dynatrace-workflow-samples/main/samples/aws/cloudformation_store_bizevents_in_s3_bucket.json --parameters ParameterKey=TenantUrl,ParameterValue=[TENANT-ID].apps.dynatrace.com ParameterKey=ConnectionName,ParameterValue=S3-Example --capabilities CAPABILITY_IAM
 ```
 
-Step 4 of the documentation details the connection setup in Dynatrace. Use `S3-Example` as connection name and retrive the ARN of the previously provisioned IAM Role to complete this step. You can retrieve this ARN using the AWS CLI with the following command:
+Step 3 of the documentation details the connection setup in Dynatrace. Use `S3-Example` as connection name and retrive the ARN of the previously provisioned IAM Role to complete this step. You can retrieve this ARN using the AWS CLI with the following command:
 ```
 aws iam list-roles --query 'Roles[?starts_with(RoleName, `DynatraceS3WorkflowExample`)].Arn'
 ```
