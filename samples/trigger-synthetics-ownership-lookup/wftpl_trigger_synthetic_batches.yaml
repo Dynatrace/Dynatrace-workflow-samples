@@ -5,9 +5,9 @@ metadata:
       - id: dynatrace.automations
         version: ^1.762.0
       - id: dynatrace.email
-        version: ^0.3.0
+        version: ^0.2.9
       - id: dynatrace.ownership
-        version: ^1.7.7
+        version: ^1.7.6
       - id: dynatrace.synthetic.workflow.action
         version: ^1.0.2
   inputs: []
