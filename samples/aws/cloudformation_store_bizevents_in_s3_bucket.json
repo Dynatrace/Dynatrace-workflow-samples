@@ -1,0 +1,101 @@
+{
+    "Parameters": {
+        "TenantUrl": {
+            "Description": "The URL of the Dynatrace Tenant (without https:// and no trailing slash)",
+            "Type": "String",
+            "AllowedPattern": "^(?!https:\\/\\/).*(?<=\\.apps\\.dynatrace\\.com)$"
+        },
+        "ConnectionName": {
+            "Description": "The name of the AWS connection used in Dynatrace",
+            "Type": "String"
+        }
+    },
+    "Description": "",
+    "Resources": {
+        "DynatraceIdentityProvider": {
+            "Type": "AWS::IAM::OIDCProvider",
+            "Properties": {
+                "ClientIdList": [
+                    {
+                        "Fn::Join": [
+                            "",
+                            [
+                                {
+                                    "Ref": "TenantUrl"
+                                },
+                                "/app-id/dynatrace.aws.connector"
+                            ]
+                        ]
+                    }
+                ],
+                "Url": "https://token.dynatrace.com"
+            }
+        },
+        "S3ExampleRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Federated": {
+                                    "Ref": "DynatraceIdentityProvider"
+                                }
+                            },
+                            "Action": "sts:AssumeRoleWithWebIdentity",
+                            "Condition": {
+                                "StringEquals": {
+                                    "dev.token.dynatracelabs.com:sub": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                "dtid:connection/",
+                                                {
+                                                    "Ref": "ConnectionName"
+                                                }
+                                            ]
+                                        ]
+                                    },
+                                    "dev.token.dynatracelabs.com:aud": {
+                                        "Fn::Join": [
+                                            "",
+                                            [
+                                                {
+                                                    "Ref": "TenantUrl"
+                                                },
+                                                "/app-id/dynatrace.aws.connector"
+                                            ]
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Description": "Role for creating a new S3 bucket and putting objects in S3. Furthermore, it allows listing regions.",
+                "Policies": [
+                    {
+                        "PolicyName": "s3-write",
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Effect": "Allow",
+                                    "Action": [
+                                        "account:ListRegions",
+                                        "s3:PutObject",
+                                        "s3:ListAllMyBuckets",
+                                        "s3:CreateBucket"
+                                    ],
+                                    "Resource": "*"
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

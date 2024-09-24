@@ -1,0 +1,85 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.840.0
+      - id: dynatrace.aws.connector
+        version: ^1.0.0-preview.2
+  inputs: []
+workflow:
+  title: Store BizEvent in S3 Bucket
+  tasks:
+    s3_put_object:
+      name: s3_put_object
+      description: Adds an object to a bucket
+      action: dynatrace.aws.connector:s3-put-object
+      input:
+        ACL: private
+        Key: "{{ now() }}"
+        Body: '{{ result("fetch_bizevents").records[0] | string }}'
+        Bucket: dynatrace-bizevents
+        region: eu-central-1
+        connection: ""
+        ContentType: JSON
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - fetch_bizevents
+      conditions:
+        states:
+          fetch_bizevents: OK
+        custom: '{{ result("fetch_bizevents").records | length > 0 }}'
+        else: SKIP
+    fetch_bizevents:
+      name: fetch_bizevents
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch bizevents, from:now() - 30d
+          | limit 1
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - s3_create_bucket
+      conditions:
+        states:
+          s3_create_bucket: OK
+    s3_list_buckets:
+      name: s3_list_buckets
+      description: Returns a list of all buckets owned by the authenticated sender of
+        the request
+      action: dynatrace.aws.connector:s3-list-buckets
+      input:
+        region: eu-central-1
+        connection: ""
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+    s3_create_bucket:
+      name: s3_create_bucket
+      description: Creates an Amazon S3 bucket
+      action: dynatrace.aws.connector:s3-create-bucket
+      input:
+        ACL: private
+        Bucket: dynatrace-bizevents
+        region: eu-central-1
+        connection: ""
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - s3_list_buckets
+      conditions:
+        states:
+          s3_list_buckets: OK
+        custom: '{{ not "dynatrace-bizevents" in
+          result("s3_list_buckets").Buckets|map(attribute="Name") }}'
+        else: SKIP
+  description: ""
+  trigger: {}
+  schemaVersion: 3
