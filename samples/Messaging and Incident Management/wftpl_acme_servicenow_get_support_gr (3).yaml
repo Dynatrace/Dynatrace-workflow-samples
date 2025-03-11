@@ -1,0 +1,63 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.ownership
+        version: ^1.7.16
+      - id: dynatrace.servicenow
+        version: ^1.2.0
+  inputs:
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.get_supportgroups.connectionId
+workflow:
+  title: (ACME) ServiceNow get Support groups
+  tasks:
+    import_teams:
+      name: import_teams
+      description: Import teams into Dynatrace.
+      action: dynatrace.ownership:import-teams-to-settings
+      active: true
+      input:
+        importData: '{{ result("get_supportgroups") }}'
+        importType: IMPORT_ONLY
+        failStrategy: CONTINUE_AND_LOG_FAILURE
+        importSource: ServiceNow groups
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_supportgroups
+      conditions:
+        states:
+          get_supportgroups: OK
+    get_supportgroups:
+      name: get_supportgroups
+      description: Fetch your groups from ServiceNow
+      action: dynatrace.servicenow:snow-get-groups
+      input:
+        connectionId: ""
+        sysparmQuery: sys_tags.537bfc831ba04a142bcddbd9dc4bcbaa=537bfc831ba04a142bcddbd9dc4bcbaa
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: time
+        time: 01:00
+      timezone: Europe/Vienna
+      isActive: false
+      isFaulty: false
+      nextExecution: null
+      filterParameters:
+        earliestStart: 2024-03-01
+      inputs: {}
+  schemaVersion: 3
+  result: null
+  input: {}
+  type: STANDARD
