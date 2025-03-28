@@ -1,0 +1,136 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.1547.2
+      - id: dynatrace.email
+        version: ^1.1.7
+  inputs: []
+workflow:
+  title: "[Sample] Email notification for new critical security findings"
+  tasks:
+    get_security_findings:
+      name: get_security_findings
+      description: Query for new vulnerability findings in the last 24 hours.
+      action: dynatrace.automations:execute-dql-query
+      active: true
+      input:
+        query: >-
+          // The query has a rolling window of 7 days and the last 24hrs.
+
+          // Security finding events which have already been reported
+
+          // before the current 24hr window will not be reported again.
+
+          fetch events, from: now() - 7d
+
+          | filter dt.system.bucket == "default_security_custom_events"
+               AND event.kind == "SECURITY_EVENT"
+               AND dt.security.risk.level == "CRITICAL"
+               AND isNotNull(object.id) AND isNotNull(object.type)
+          | fieldsAdd object.name=coalesce(object.name, object.id)
+
+          // Aggregate security findings per affected object
+
+          | summarize {
+                finding_events = collectArray(
+                  record(
+                    event.provider,
+                    dt.security.risk.level,
+                    finding.id,
+                    finding.title,
+                    finding.time.created=toTimestamp(finding.time.created),
+                    ingest_time= timestamp
+                  )
+                )
+              }, by:{ object.id , object.name, object.type}
+          // Filter out, if this object had already a finding within queried
+          last 7 days
+
+          // and not only new occurence within the last 24 hours.
+
+          | filterOut iAny(finding_events[][ingest_time] < now() - 24h)
+
+          // Expand and deduplicate for repetitive findings if they
+
+          // were reported more than once in the last 24 hours.
+
+          | expand finding_events
+
+          | dedup { finding_events[event.provider], object.id,
+          finding_events[finding.id] } 
+
+          // Aggregate again to count the unique findings for the object.
+
+          | summarize {
+                findings_count = count(),
+                finding_events = collectArray(
+                  record(
+                    event.provider=finding_events[event.provider],
+                    dt.security.risk.level=finding_events[dt.security.risk.level],
+                    finding.id=finding_events[finding.id],
+                    finding.title=finding_events[finding.title],
+                    finding.time.created=finding_events[finding.time.created],
+                    ingest_time=finding_events[ingest_time]
+                  )
+                )
+              }, by:{ object.id , object.name, object.type}
+          | sort finding_events[][finding.time.created] desc
+      customSampleResult: {}
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+        custom: ""
+    send_email_notification:
+      name: send_email_notification
+      description: Send email
+      action: dynatrace.email:send-email
+      input:
+        cc: []
+        to: []
+        bcc: []
+        taskId: "{{ task().id }}"
+        content: >-
+          {% for object in result("get_security_findings").records %}
+            {{ object.get("findings_count") }} critical findings in {{ object.get("object.type") }}  {{ object.get("object.name") }}:
+
+            {% for finding in object.get("finding_events") %}
+                {{ finding.get("dt.security.risk.level") }} | Found by {{ finding.get("event.provider") }} | {{ finding.get("finding.time.created") }} | {{ finding.get("finding.title") }} 
+            
+            {% endfor %}
+          {% endfor %}
+        subject: Critical security findings detected on
+          {{result("get_security_findings") | length}} objects!
+        executionId: "{{ execution().id }}"
+        environmentUrl: "{{ environment().url }}"
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_security_findings
+      conditions:
+        states:
+          get_security_findings: OK
+  description: ""
+  trigger:
+    schedule:
+      rule: null
+      trigger:
+        type: time
+        time: 08:00
+      timezone: Europe/Vienna
+      isActive: false
+      isFaulty: false
+      nextExecution: null
+      filterParameters:
+        earliestStart: 2024-04-10
+      inputs: {}
+  schemaVersion: 3
+  result: null
+  input: {}
+  hourlyExecutionLimit: 1000
+  type: STANDARD
