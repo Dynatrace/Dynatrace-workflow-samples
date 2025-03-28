@@ -25,3 +25,6 @@ You can trigger a workflow in 2 different ways:
 ## Sample Workflows for Ingested Security Findings
 * `jira_tickets_for_critical_container_vulnerabilities.yaml` - Jira ticket creation for new critical container vulnerability findings.
 * `slack_notification_for_critical_container_vulnerabilities.yaml` - Slack notification for new critical container vulnerability findings.
+* `slack_notifications_for_critical_vulnerabilities.yaml` - A generic version for Slack notification for new critical vulnerability findings (grouped by object).
+* `jira_tickets_for_critical_vulnerabilities.yaml` - A generic version for Jira ticket creation for new critical vulnerability findings (grouped by object).
+* `email_for_critical_security_findings.yaml` - A generic Email notification for new critical vulnerability findings (grouped by object).
