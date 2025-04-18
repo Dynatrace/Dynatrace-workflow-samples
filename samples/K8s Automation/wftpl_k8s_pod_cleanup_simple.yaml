@@ -1,0 +1,76 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.kubernetes.connector
+        version: ^1.0.0-preview.13
+  inputs:
+    - type: connection
+      schema: app:dynatrace.kubernetes.connector:connection
+      targets:
+        - tasks.delete_pod.connection
+workflow:
+  title: K8s Pod Cleanup (simple)
+  tasks:
+    delete_pod:
+      name: delete_pod
+      description: Delete Kubernetes resources
+      action: dynatrace.kubernetes.connector:delete
+      input:
+        force: true
+        resource:
+          name: '{{event()["k8s.workload.name"]}}'
+          type:
+            kind: Pod
+            name: pods
+            verbs:
+              - create
+              - delete
+              - deletecollection
+              - get
+              - list
+              - patch
+              - update
+              - watch
+            apiVersion: v1
+            namespaced: true
+            shortNames:
+              - po
+          namespace: '{{event()["dt.entity.cloud_application_namespace.name"]}}'
+        connection: ""
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+        custom: "{{event()[\"k8s.workload.kind\"]==\"pod\"}}
+
+          \\ 
+
+          \ "
+        else: STOP
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: |
+        event.kind == "DAVIS_EVENT"
+        AND event.provider == "KUBERNETES_ANOMALY_DETECTION"
+        AND event.category == "RESOURCE_CONTENTION"
+        AND event.name == "Pods stuck in terminating"
+      isActive: true
+      uniqueExpression: null
+      triggerConfiguration:
+        type: event
+        value:
+          query: |
+            event.kind == "DAVIS_EVENT"
+            AND event.provider == "KUBERNETES_ANOMALY_DETECTION"
+            AND event.category == "RESOURCE_CONTENTION"
+            AND event.name == "Pods stuck in terminating"
+          eventType: events
+  schemaVersion: 3
+  result: null
+  input: {}
+  hourlyExecutionLimit: 1000
+  type: STANDARD
