@@ -15,7 +15,7 @@ Apply each file with kubectl apply -f xxxx.yaml
 **2. Optional: For a simulation and test setup you can create a pod, which will stay in termination state**
 
 Create a pod, which will stuck in terminating phase, once you delete it with [podtermination.yaml](/podtermination.yaml)
-If required for security reason,  replace the image with a trusted image on your side. 
+If required for security reason, replace the image with a trusted image on your side. 
 
 **4. Workflow**
 
