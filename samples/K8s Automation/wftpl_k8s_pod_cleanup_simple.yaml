@@ -3,7 +3,7 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.kubernetes.connector
-        version: ^1.0.0-preview.13
+        version: ^1.0.0
   inputs:
     - type: connection
       schema: app:dynatrace.kubernetes.connector:connection
