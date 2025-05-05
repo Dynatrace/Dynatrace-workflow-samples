@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: stuck-pod
+spec:
+  containers:
+  - name: busybox
+    image: busybox
+    command: ["sh", "-c", "sleep 6000"]
+    lifecycle:
+      preStop:
+        exec:
+          command: ["sh", "-c", "sleep 6000"]
+  terminationGracePeriodSeconds: 6000

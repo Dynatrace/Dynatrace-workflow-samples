@@ -1,0 +1,15 @@
+apiVersion: dynatrace.com/v1alpha1
+kind: EdgeConnect
+metadata:
+  name: aut-edgeconnect
+  namespace: dynatrace
+spec:
+  apiServer: abcde123456.apps.dynatrace.com
+  serviceAccountName: edgeconnect-deployment-rollout-restarter
+  oauth:
+    provisioner: true
+    clientSecret: aut-edgeconnect-oauth
+    endpoint: https://sso.dynatrace.com/sso/oauth2/token
+    resource: urn:dtenvironment:abcde123456
+  kubernetesAutomation:
+    enabled: true
