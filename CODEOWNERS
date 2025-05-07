@@ -1,0 +1,34 @@
+# Check https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-syntax
+
+# These owners will be the default owners for everything in
+# the repo. Unless a later match takes precedence, they will
+# be requested for a review when someone opens a PR.
+*       @christian-kreuzberger-dtx @wlfghdr @g3kl @miigwi
+
+
+# Approvers for samples
+# If you add a new sample, please add yourself as an approver
+
+# Software Delivery
+/samples/aws                                                    @amohrd
+"/samples/K8s Automation"/*                                     @amohrd
+"/samples/Messaging and Incident Management"/*                  @amohrd
+"/samples/Messaging and Incident Management"/ServiceNow_calculate_severity_based_on_impact.yaml     @christian-kreuzberger-dtx
+"/samples/red hat ansible automation platform"/*                @amohrd
+
+"/samples/Parse DQL Result and Trigger Conditional Branches"/*  @wlfghdr
+"/samples/Team-Import"/*                                        @wlfghdr
+"/samples/JavaScript Snippets"/*                                @wlfghdr
+
+
+# Account Management
+/samples/acct-management                            @imrankhan4z
+
+# Notify.sh Sample
+/samples/ntfy.sh/*                                  @agardnerIT
+
+# Security
+/samples/security/*                                 @leykin-valeriy
+
+# VM Right sizting
+/samples/VM-Right-Sizing/*                          @DaniloVukotic
