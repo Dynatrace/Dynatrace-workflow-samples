@@ -34,6 +34,6 @@ Please describe how you tested your change. Provide instructions so we can try t
 **New JavaScript samples**
 - [ ] I have added relevant inline code comments to my sample
 
-**Updating existing Workflow and JavaSCript samples**
+**Updating existing Workflow and JavaScript samples**
 - [ ] readme.md updated
 - [ ] Screenshots updated
