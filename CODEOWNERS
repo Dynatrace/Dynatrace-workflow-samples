@@ -1,0 +1,13 @@
+# Check https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners#codeowners-syntax
+
+# These owners will be the default owners for everything in
+# the repo. Unless a later match takes precedence, they will
+# be requested for a review when someone opens a PR.
+*       @christian-kreuzberger-dtx @wlfghdr @g3kl @miigwi @amohrd
+
+
+# Additional Approvers for samples
+# If you add a new sample, please add yourself as an approver
+
+# Security
+/samples/security/*                                 @leykin-valeriy
