@@ -23,6 +23,10 @@ You can trigger a workflow in 2 different ways:
 * `ocsf_send_critical_vulnerabilities.yaml` - POST an HTTP request to a third-party tool for new critical vulnerabilities in the [Open Cyber Security Format (OCSF)](https://schema.ocsf.io/1.1.0/classes/vulnerability_finding?extensions=linux,win).
 
 ## Sample Workflows for Ingested Security Findings
+Note: Since the introduction of the Grail security table, up-to-date artifacts are now delivered directly in-product through new integrations.
+As a result, the artifacts in this repository are no longer maintained and will become outdated.
+For further details, see the [Grail security table migration guide](https://docs.dynatrace.com/docs/secure/threat-observability/migration).
+
 * `jira_tickets_for_critical_container_vulnerabilities.yaml` - Jira ticket creation for new critical container vulnerability findings.
 * `slack_notification_for_critical_container_vulnerabilities.yaml` - Slack notification for new critical container vulnerability findings.
 * `slack_notifications_for_critical_vulnerabilities.yaml` - A generic version for Slack notification for new critical vulnerability findings (grouped by object).
