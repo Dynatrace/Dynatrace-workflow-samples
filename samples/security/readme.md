@@ -32,3 +32,8 @@ For further details, see the [Grail security table migration guide](https://docs
 * `slack_notifications_for_critical_vulnerabilities.yaml` - A generic version for Slack notification for new critical vulnerability findings (grouped by object).
 * `jira_tickets_for_critical_vulnerabilities.yaml` - A generic version for Jira ticket creation for new critical vulnerability findings (grouped by object).
 * `email_for_critical_security_findings.yaml` - A generic Email notification for new critical vulnerability findings (grouped by object).
+
+## Sample Workflow for Threat Detection
+This sample workflow serves as an extensible blueprint that can be modified to address additional threat vectors. The demonstrated workflow provides a foundational architecture designed for rapid deployment and iteration. Apart from the DQL query being adjustable the workflow can be extended to e.g., lookup ownership and send notifications, include immediate response actions like deleting pods, and more.
+
+* `kubernetes_service_account_unauthorized_access.yaml` - DQL query aiming to detect potentially comrpomised K8s service accounts. 
