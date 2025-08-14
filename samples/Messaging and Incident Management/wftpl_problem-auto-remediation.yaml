@@ -1,0 +1,326 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.1472.2
+      - id: dynatrace.ownership
+        version: ^1.7.16
+      - id: dynatrace.redhat.ansible
+        version: ^1.1.1
+      - id: dynatrace.servicenow
+        version: ^1.2.0
+      - id: dynatrace.slack
+        version: ^2.4.1
+  inputs:
+    - type: connection
+      schema: app:dynatrace.redhat.ansible:eda-webhook.connection
+      targets:
+        - tasks.trigger_ansible.connectionId
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.create_incident.connectionId
+        - tasks.search_incident.connectionId
+        - tasks.comment_on_incident.connectionId
+        - tasks.comment_on_an_incident_1.connectionId
+    - type: connection
+      schema: app:dynatrace.slack:connection
+      targets:
+        - tasks.send_slack_notification.connection
+workflow:
+  title: problem-auto-remediation
+  tasks:
+    get_owners:
+      name: get_owners
+      description: Workflow ends here if no expected events were found. Retrieves
+        owners from Entities and Team identifiers.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: '{{ event()["root_cause_entity_id"] }}'
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - filter_e2e_problem
+      conditions:
+        states:
+          filter_e2e_problem: OK
+        custom: '{{ result("filter_e2e_problem").records | length > 0 }}'
+    create_incident:
+      name: create_incident
+      description: Create an incident in ServiceNow
+      action: dynatrace.servicenow:snow-create-incident
+      input:
+        group:
+          id: '{{ result("get_owners").owners[0].name }}'
+          displayName: '{{ result("get_owners").owners[0].name }}'
+        caller: ""
+        impact: "3"
+        urgency: "3"
+        category: inquiry
+        description: |-
+          Event kind: {{ event()["event.kind"]}}
+          Event name: {{ event()["event.name"] }}
+          Event category: {{ event()["event.category"] }} 
+          Affected Entity: {{event()["affected_entity_ids"]}}
+          Root cause entity: {{ event()["root_cause_entity_name"]}}
+        subCategory: internal application
+        connectionId: ""
+        correlationId: '{{ event()["event.id"] }}'
+        shortDescription: '{{ event()["event.category"] }} {{ event()["event.name"] }}'
+      position:
+        x: 2
+        y: 4
+      predecessors:
+        - search_incident
+      conditions:
+        states:
+          search_incident: OK
+        custom: '{{ result("search_incident") | length == 0}}'
+        else: SKIP
+    post_on_problem:
+      name: post_on_problem
+      description: Comment on a problem in Dynatrace
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >
+          import { problemsClient } from
+          "@dynatrace-sdk/client-classic-environment-v2"
+
+          import { executionsClient } from "@dynatrace-sdk/client-automation"
+
+
+          export default async function ({ execution_id }) {
+            const ex = await executionsClient.getExecution({ id: execution_id })
+            if (ex.params === undefined) {
+              console.error("ex.params is undefined")
+              return
+            }
+            const pid = ex.params.event["event.id"]
+
+            console.log(`Remediation workflow started on Event Driven Ansible`)
+            await problemsClient.createComment({
+              problemId: pid,
+              body: {
+                message: `Remediation workflow started on Event Driven Ansible`,
+                context: "Dynatrace Workflow",
+              },
+            })
+          }
+      position:
+        x: 0
+        y: 6
+      predecessors:
+        - trigger_ansible
+      conditions:
+        states:
+          trigger_ansible: OK
+    search_incident:
+      name: search_incident
+      description: Search for incidents in ServiceNow
+      action: dynatrace.servicenow:snow-search-incidents
+      input:
+        connectionId: ""
+        sysparmLimit: "100"
+        sysparmQuery: correlation_id={{ event()["event.id"] }}
+        sysparmFields: ""
+      position:
+        x: 1
+        y: 3
+      predecessors:
+        - get_owners
+      conditions:
+        states:
+          get_owners: OK
+        else: STOP
+    trigger_ansible:
+      name: trigger_ansible
+      description: Send an event to the Red Hat Event-Driven-Ansible Controller via
+        Event Source Plugin
+      action: dynatrace.redhat.ansible:send-event-to-eda
+      input:
+        eventData: >-
+          {% set record = result("filter_e2e_problem")["records"][0] %}
+
+          {% set release_product = record["deployment.release_product"]|lower %}
+
+          {% set remediation_action = record["deployment.remediation_action"] %}
+
+          {
+            "action": "problem-remediation",
+            "tenant_url": "{{ environment().url }}",
+            "application": "{{ release_product }}",
+            "problem_name": "{{ remediation_action }}",
+          {% if release_product == "easytrade" %}
+            "easytrade_url": "https://easytrade.live.demoability.dynatracelabs.com"
+          {% elif release_product == "easytravel" %}
+            "easytravel_url": "http://ec2-100-27-205-127.compute-1.amazonaws.com:8091"
+          {% endif %}
+
+          }
+        connectionId: ""
+      position:
+        x: 1
+        y: 5
+      predecessors:
+        - create_incident
+        - comment_on_incident
+      conditions:
+        states:
+          create_incident: ANY
+          comment_on_incident: ANY
+    filter_e2e_problem:
+      name: filter_e2e_problem
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch events, from: toTimestamp("{{event()['event.start']}}")-1h
+          | filter dt.entity.service == "{{ event()['root_cause_entity_id']}}"
+          | filter deployment.remediation_action_type == "ansible"
+          | sort timestamp desc
+          | limit 1
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+        custom: "{{ event()['event.status'] == \"ACTIVE\" }}"
+        else: STOP
+    comment_on_incident:
+      name: comment_on_incident
+      description: Comment on an incident in ServiceNow
+      action: dynatrace.servicenow:snow-comment-on-incident
+      input:
+        number: '{{ result("search_incident")[0].number }}'
+        comment: |-
+          Event kind: {{ event()["event.kind"]}}
+          Event name: {{ event()["event.name"] }}
+          Event category: {{ event()["event.category"] }} 
+          Affected Entity: {{event()["affected_entity_ids"]}}
+          Root cause entity: {{ event()["root_cause_entity_name"]}}
+        connectionId: ""
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - search_incident
+      conditions:
+        states:
+          search_incident: OK
+        custom: '{{ result("search_incident") | length > 0}}'
+        else: SKIP
+    send_slack_notification:
+      name: send_slack_notification
+      description: Send a message to a Slack workspace
+      action: dynatrace.slack:slack-send-message
+      input:
+        channel: '{{ result("get_owners").slackChannels[0].slackChannel }}'
+        message: >
+          {
+              "blocks": [
+                  {
+                      "type": "section",
+                      "text": {
+                          "type": "mrkdwn",
+                          "text": "Dynatrace AutomationEngine :dt: \n\nA problem has been detected in your Dynatrace environment. Dynatrace DavisAI has identified *{{ result("filter_e2e_problem").records[0]["deployment.release_product"] }}* application as affected entity caused by *{{ event().root_cause_entity_name }}* and will automatically trigger a remediation.\n\nProblem ID: {{event().display_id}} \nStatus: *REMEDIATION TRIGGERED WITH RED HAT EVENT DRIVEN ANSIBLE *"
+                      }
+                  },
+                  {
+                      "type": "actions",
+                      "elements": [
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View remediation workflow"
+                              },
+                              "value": "rem_wf_link",
+                              "url": "{{ environment().url }}/ui/apps/dynatrace.automations/executions/{{ execution().id }}"
+                          },
+                          {
+                              "type": "button",
+                              "text": {
+                                  "type": "plain_text",
+                                  "text": "View affected entity"
+                              },
+                              "value": "entity_link",
+                              "url": "{{ environment().url }}/ui/apps/dynatrace.classic.services/ui/entity/{{ event().affected_entity_ids }}"
+                          }
+                      ]
+                  }
+              ]
+          }
+        reaction: []
+        connection: ""
+        workflowID: "{{ execution().workflow.id }}"
+        channelType: expression
+        executionID: "{{ execution().id }}"
+        executionDate: "{{ execution().started_at }}"
+        appendToThread: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      position:
+        x: -1
+        y: 3
+      predecessors:
+        - get_owners
+      conditions:
+        states:
+          get_owners: OK
+        else: STOP
+    comment_on_an_incident_1:
+      name: comment_on_an_incident_1
+      description: Comment on an incident in ServiceNow
+      action: dynatrace.servicenow:snow-comment-on-incident
+      input:
+        number: '{%if result("search_incident") | length == 0
+          %}{{result("create_incident").number}}{%else
+          %}{{result("search_incident")[0].number}}{%endif%}'
+        comment: Remediation workflow started on Event Driven Ansible
+        connectionId: ""
+      position:
+        x: 1
+        y: 6
+      predecessors:
+        - trigger_ansible
+      conditions:
+        states:
+          trigger_ansible: OK
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: event.kind == "DAVIS_PROBLEM" AND event.status == "ACTIVE" AND
+        (event.status_transition == "CREATED" OR event.status_transition ==
+        "UPDATED" OR event.status_transition == "REOPENED") AND (event.category
+        == "AVAILABILITY" OR event.category == "ERROR" OR event.category ==
+        "SLOWDOWN") AND (isNotNull(root_cause_entity_id) and
+        matchesPhrase(affected_entity_types, "dt.entity.application") and
+        dt.davis.is_duplicate == false) AND (matchesValue(entity_tags,
+        "ServiceNow*"))
+      isActive: true
+      uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
+        event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
+        "REFRESHED") else "resolved" }}-{{
+        event()["dt.davis.last_reopen_timestamp"] }}'
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            slowdown: true
+            availability: true
+          entityTags:
+            ServiceNow:
+              - ""
+          customFilter: isNotNull(root_cause_entity_id) and
+            matchesPhrase(affected_entity_types, "dt.entity.application") and
+            dt.davis.is_duplicate == false
+          onProblemClose: false
+          entityTagsMatch: all
+  schemaVersion: 3
+  result: null
+  input: {}
+  type: STANDARD
