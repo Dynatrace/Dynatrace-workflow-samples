@@ -36,4 +36,4 @@ For further details, see the [Grail security table migration guide](https://docs
 ## Sample Workflow for Threat Detection
 This sample workflow serves as an extensible blueprint that can be modified to address additional threat vectors. The demonstrated workflow provides a foundational architecture designed for rapid deployment and iteration. Apart from the DQL query being adjustable the workflow can be extended to e.g., lookup ownership and send notifications, include immediate response actions like deleting pods, and more.
 
-* `kubernetes_service_account_unauthorized_access.yaml` - DQL query aiming to detect potentially compromised K8s service accounts. 
+* `kubernetes_service_account_unauthorized_access.yaml` - DQL query aiming to detect potentially compromised K8s service accounts. This sample is part of a comprehensive [documented use case](https://dt-url.net/en230wg). Additional technical specifications, system requirements, and prerequisite configurations are available in the official Dynatrace documentation.
