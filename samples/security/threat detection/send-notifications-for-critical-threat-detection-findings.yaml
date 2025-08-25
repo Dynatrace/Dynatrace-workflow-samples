@@ -96,7 +96,7 @@ workflow:
       action: dynatrace.automations:run-workflow
       active: true
       input:
-        workflowId: 16515850-2577-4ce7-996b-986125d496ff
+        workflowId: <add-target-sub-workflow-id>
         workflowInput: '{{ result("build_sub_workflow_input") | to_json }}'
       position:
         x: 0
