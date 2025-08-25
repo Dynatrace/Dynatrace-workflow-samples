@@ -1,0 +1,130 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.2109.0
+      - id: dynatrace.ownership
+        version: ^1.7.26
+  inputs: []
+workflow:
+  title: "Send Notifications for Critical Threat Detection Findings"
+  tasks:
+    build_sub_workflow_input:
+      name: build_sub_workflow_input
+      description: Run custom JavaScript code.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { getEnvironmentUrl } from '@dynatrace-sdk/app-environment';
+
+
+          export default async function () {
+
+            const ex = await execution();
+            const event = ex.params.event;
+            const owners_result = await ex.result('get_impacted_component_owners');
+
+            // Build finding link
+            const isoTimestamp = event.requestreceivedtimestamp;
+            const daysBack = "15";
+
+            // Parse the ISO string into a Date object
+            const date = new Date(isoTimestamp);
+            
+            // Get the Unix timestamp in milliseconds
+            const timestampMillis = date.getTime();
+            
+            const findingLink = `${getEnvironmentUrl()}/ui/apps/dynatrace.security.threats.exploits/?perspective=Detailed&from=now%28%29-${daysBack}d&to=now%28%29&detailsId=${ex.params.event["event.id"]}%3A${timestampMillis}`;
+
+            const obj = {};
+            obj.timestamp = event.timestamp;
+            obj.findingLink = findingLink;
+            obj.title = event["finding.title"];
+            obj.description = event["event.description"];
+            obj.severity = event["finding.severity"];
+            obj.risk = event["dt.security.risk.level"];
+            obj.type = event["detection.type"];
+            obj.provider = event["event.provider"];
+            obj.cluster = event["k8s.cluster.name"];
+            obj.namespace = event["k8s.namespace.name"];
+            obj.pod = event["k8s.pod.name"];
+            obj.uid = event["k8s.pod.uid"];
+            obj.ip = event["k8s.pod.ip"];
+            obj.content = event.content;
+            // Leave array empty in case a specific notification mean should not be used
+            obj.slack = owners_result.slackChannels;
+            obj.email = owners_result.email;
+            obj.msTeams = owners_result.msTeams;
+            
+            return obj;
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_impacted_component_owners
+      conditions:
+        states:
+          get_impacted_component_owners: OK
+    get_impacted_component_owners:
+      name: get_impacted_component_owners
+      description: Retrieves owners from Entities and Team identifiers.
+      action: dynatrace.ownership:get-ownership-from-entity
+      active: true
+      input:
+        entityIds: |-
+          {% if event()["k8s.pod.cloud_app_id"] | length > 0 %}
+          {{ event()["k8s.pod.cloud_app_id"] }}
+          {% else %}
+          {{ event()["dt.entity.kubernetes_cluster"] }}
+          {% endif %}
+        responsibilities:
+          - Development
+          - Security
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+    trigger_notification_sender_workflow:
+      name: trigger_notification_sender_workflow
+      description: Modularize your workflows, run any existing workflow.
+      action: dynatrace.automations:run-workflow
+      active: true
+      input:
+        workflowId: 16515850-2577-4ce7-996b-986125d496ff
+        workflowInput: '{{ result("build_sub_workflow_input") | to_json }}'
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - build_sub_workflow_input
+      conditions:
+        states:
+          build_sub_workflow_input: OK
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: |-
+        event.type == "DETECTION_FINDING"
+        AND (dt.security.risk.level == "HIGH" OR
+          dt.security.risk.level == "CRITICAL")
+      isActive: false
+      uniqueExpression: null
+      triggerConfiguration:
+        type: event
+        value:
+          query: |-
+            event.type == "DETECTION_FINDING"
+            AND (dt.security.risk.level == "HIGH" OR
+              dt.security.risk.level == "CRITICAL")
+          eventType: security.events
+  schemaVersion: 3
+  result: null
+  input: {}
+  hourlyExecutionLimit: 1000
+  type: STANDARD
