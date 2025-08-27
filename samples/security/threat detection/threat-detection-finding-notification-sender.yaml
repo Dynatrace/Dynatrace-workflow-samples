@@ -11,6 +11,7 @@ metadata:
   inputs: []
 workflow:
   title: "Threat Detection Finding - Notification Sender"
+  id: 16515850-2577-4ce7-996b-986125d496ff
   tasks:
     send_email:
       name: send_email
