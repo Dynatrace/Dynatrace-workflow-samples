@@ -8,10 +8,10 @@ metadata:
         version: ^1.7.26
   inputs: []
 workflow:
-  title: "Send Notifications for Critical Threat Detection Findings"
+  title: Instant Notification for Critical K8s Detection Findings
   tasks:
-    build_sub_workflow_input:
-      name: build_sub_workflow_input
+    prepare_subwf_input_object:
+      name: prepare_subwf_input_object
       description: Run custom JavaScript code.
       action: dynatrace.automations:run-javascript
       input:
@@ -39,27 +39,52 @@ workflow:
             
             const findingLink = `${getEnvironmentUrl()}/ui/apps/dynatrace.security.threats.exploits/?perspective=Detailed&from=now%28%29-${daysBack}d&to=now%28%29&detailsId=${ex.params.event["event.id"]}%3A${timestampMillis}`;
 
-            const obj = {};
-            obj.timestamp = event.timestamp;
-            obj.findingLink = findingLink;
-            obj.title = event["finding.title"];
-            obj.description = event["event.description"];
-            obj.severity = event["finding.severity"];
-            obj.risk = event["dt.security.risk.level"];
-            obj.type = event["detection.type"];
-            obj.provider = event["event.provider"];
-            obj.cluster = event["k8s.cluster.name"];
-            obj.namespace = event["k8s.namespace.name"];
-            obj.pod = event["k8s.pod.name"];
-            obj.uid = event["k8s.pod.uid"];
-            obj.ip = event["k8s.pod.ip"];
-            obj.content = event.content;
-            // Leave array empty in case a specific notification mean should not be used
-            obj.slack = owners_result.slackChannels;
-            obj.email = owners_result.email;
-            obj.msTeams = owners_result.msTeams;
-            
-            return obj;
+            // Craft text message
+            const textMsg = `
+          **Detection summary**:
+
+          - **Timestamp**: ${event?.["timestamp"]}
+
+          - **Title**: ${event?.["finding.title"]}
+
+          - **Description**: ${event?.["event.description"]}
+
+          - **Severity**: ${event?.["finding.severity"]}
+
+          - **Risk**: ${event?.["dt.security.risk.level"]}
+
+          - **Detection type**: ${event?.["detection.type"]} 
+
+          - **Provider**: ${event?.["event.provider"]}
+
+          - **Finding link**: ${findingLink}
+
+
+          **Impacted asset**:
+
+          - **Cluster**: ${event?.["k8s.cluster.name"]}
+
+          - **Namespace**: ${event?.["k8s.namespace.name"]}
+
+          - **Pod**: ${event?.["k8s.pod.name"]}
+            - **Pod uid**: ${event?.["k8s.pod.uid"]}
+            - **Pod IP Address**: ${event?.["k8s.pod.ip"]})
+
+          **Full detection finding object**:
+
+          - **Raw_content**: ${event?.["dt.raw_data"]}
+
+          `;
+
+            // Enrich event object with finding link and ownership information
+            event.slackChannels = owners_result.slackChannels;
+            event.email = owners_result.email;
+            event.msTeams = owners_result.msTeams;
+
+            return {
+              event,
+              textMsg
+            };
           }
       position:
         x: 0
@@ -69,6 +94,21 @@ workflow:
       conditions:
         states:
           get_impacted_component_owners: OK
+    trigger_notification_sender:
+      name: trigger_notification_sender
+      description: Modularize your workflows, run any existing workflow.
+      action: dynatrace.automations:run-workflow
+      input:
+        workflowId: 34515850-2577-4ce7-996b-986125d496ff
+        workflowInput: '{{ result("prepare_subwf_input_object") | to_json }}'
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - prepare_subwf_input_object
+      conditions:
+        states:
+          prepare_subwf_input_object: OK
     get_impacted_component_owners:
       name: get_impacted_component_owners
       description: Retrieves owners from Entities and Team identifiers.
@@ -82,7 +122,6 @@ workflow:
           {{ event()["dt.entity.kubernetes_cluster"] }}
           {% endif %}
         responsibilities:
-          - Development
           - Security
       position:
         x: 0
@@ -90,29 +129,15 @@ workflow:
       predecessors: []
       conditions:
         states: {}
-    trigger_notification_sender_workflow:
-      name: trigger_notification_sender_workflow
-      description: Modularize your workflows, run any existing workflow.
-      action: dynatrace.automations:run-workflow
-      active: true
-      input:
-        workflowId: 16515850-2577-4ce7-996b-986125d496ff
-        workflowInput: '{{ result("build_sub_workflow_input") | to_json }}'
-      position:
-        x: 0
-        y: 3
-      predecessors:
-        - build_sub_workflow_input
-      conditions:
-        states:
-          build_sub_workflow_input: OK
   description: ""
   trigger:
     eventTrigger:
       filterQuery: |-
         event.type == "DETECTION_FINDING"
-        AND (dt.security.risk.level == "HIGH" OR
-          dt.security.risk.level == "CRITICAL")
+        AND (
+          dt.security.risk.level == "HIGH" OR
+          dt.security.risk.level == "CRITICAL"
+        )
       isActive: false
       uniqueExpression: null
       triggerConfiguration:
@@ -120,8 +145,10 @@ workflow:
         value:
           query: |-
             event.type == "DETECTION_FINDING"
-            AND (dt.security.risk.level == "HIGH" OR
-              dt.security.risk.level == "CRITICAL")
+            AND (
+              dt.security.risk.level == "HIGH" OR
+              dt.security.risk.level == "CRITICAL"
+            )
           eventType: security.events
   schemaVersion: 3
   result: null
