@@ -37,5 +37,7 @@ For further details, see the [Grail security table migration guide](https://docs
 This sample workflow serves as an extensible blueprint that can be modified to address additional threat vectors. The demonstrated workflow provides a foundational architecture designed for rapid deployment and iteration. Apart from the DQL query being adjustable the workflow can be extended to e.g., lookup ownership and send notifications, include immediate response actions like deleting pods, and more.
 
 * `kubernetes_service_account_unauthorized_access.yaml` - DQL query aiming to detect potentially compromised K8s service accounts. This sample is part of a comprehensive [documented use case](https://dt-url.net/en230wg). Additional technical specifications, system requirements, and prerequisite configurations are available in the official Dynatrace documentation.
-* `send-notifications-for-critical-threat-detection-findings.yaml` - A sample workflow template that is automatically triggered when new threat detection findings are generated. It retrieves ownership information for impacted components and sends notifications containing finding insights via Slack, Microsoft Teams, or email.
-    * `threat-detection-finding-notification-sender.yaml` - A sample sub-workflow that handles notification delivery based on the provided input information object.
+
+* `instant-notification-for-critical-k8s-threat-detection-findings.yaml` - Workflow template that gets automatically triggered when new Kubernetes threat detection findings are generated, retrieves ownership information for impacted components and sends a notifications containing finding insights via Slack, Microsoft Teams, or email.
+
+* `threat-detection-notification-sender.yaml` - A sample sub-workflow that handles notification delivery based on the provided input information object.
