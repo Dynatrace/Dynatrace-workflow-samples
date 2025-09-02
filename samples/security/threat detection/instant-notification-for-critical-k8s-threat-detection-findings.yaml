@@ -1,0 +1,177 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.2075.0
+      - id: dynatrace.ownership
+        version: ^1.7.24
+  inputs: []
+workflow:
+  title: Instant Notification for Critical K8s Detection Findings
+  tasks:
+    prepare_subwf_input_object:
+      name: prepare_subwf_input_object
+      description: Run custom JavaScript code.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { getEnvironmentUrl } from '@dynatrace-sdk/app-environment';
+
+
+          export default async function () {
+
+            const ex = await execution();
+            const event = ex.params.event;
+            const owners_result = await ex.result('get_impacted_component_owners');
+
+            // Build finding link
+            const isoTimestamp = event.requestreceivedtimestamp;
+            const daysBack = "15";
+
+            // Parse the ISO string into a Date object
+            const date = new Date(isoTimestamp);
+            
+            // Get the Unix timestamp in milliseconds
+            const timestampMillis = date.getTime();
+            
+            const findingLink = `${getEnvironmentUrl()}/ui/apps/dynatrace.security.threats.exploits/?perspective=Detailed&from=now%28%29-${daysBack}d&to=now%28%29&detailsId=${ex.params.event["event.id"]}%3A${timestampMillis}`;
+
+            // Craft text message
+            const textMsg = `
+          **Detection summary**:
+
+          - **Timestamp**: ${event?.["timestamp"]}
+
+          - **Title**: ${event?.["finding.title"]}
+
+          - **Description**: ${event?.["event.description"]}
+
+          - **Severity**: ${event?.["finding.severity"]}
+
+          - **Risk**: ${event?.["dt.security.risk.level"]}
+
+          - **Detection type**: ${event?.["detection.type"]} 
+
+          - **Provider**: ${event?.["event.provider"]}
+
+          - **Finding link**: ${findingLink}
+
+
+          **Impacted asset**:
+
+          - **Cluster**: ${event?.["k8s.cluster.name"]}
+
+          - **Namespace**: ${event?.["k8s.namespace.name"]}
+
+          - **Pod**: ${event?.["k8s.pod.name"]}
+            - **Pod uid**: ${event?.["k8s.pod.uid"]}
+            - **Pod IP Address**: ${event?.["k8s.pod.ip"]})
+
+          **Full detection finding object**:
+
+          - **Raw_content**: ${event?.["dt.raw_data"]}
+
+          `;
+
+            // Enrich event object with finding link and ownership information
+            event.slackChannels = owners_result.slackChannels;
+            event.email = owners_result.email;
+            event.msTeams = owners_result.msTeams;
+
+            return {
+              event,
+              textMsg
+            };
+          }
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_impacted_component_owners
+      conditions:
+        states:
+          get_impacted_component_owners: OK
+        custom: '{{result("get_impacted_component_owners")["owners"] | length > 0}}'
+    trigger_notification_sender:
+      name: trigger_notification_sender
+      description: Modularize your workflows, run any existing workflow.
+      action: dynatrace.automations:run-workflow
+      input:
+        workflowId: 34515850-2577-4ce7-996b-986125d496ff
+        workflowInput: '{{ result("prepare_subwf_input_object") | to_json }}'
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - prepare_subwf_input_object
+      conditions:
+        states:
+          prepare_subwf_input_object: OK
+    get_impacted_component_owners:
+      name: get_impacted_component_owners
+      description: Retrieves owners from Entities and Team identifiers.
+      action: dynatrace.ownership:get-ownership-from-entity
+      active: true
+      input:
+        entityIds: >-
+          {% if "k8s.pod.cloud_app_id" in event() and
+          event()["k8s.pod.cloud_app_id"] | length > 0 %}
+
+          {{ event()["k8s.pod.cloud_app_id"] }}
+
+          {% endif %}
+
+          {% if "dt.entity.kubernetes_cluster" in event() and
+          event()["dt.entity.kubernetes_cluster"] | length > 0 %}
+
+          {{ event()["dt.entity.kubernetes_cluster"] }}
+
+          {% endif %}
+        responsibilities:
+          - Security
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+        custom: '{{"k8s.pod.cloud_app_id" in event() or "dt.entity.kubernetes_cluster"
+          in event()}}'
+        else: STOP
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: |-
+        event.type == "DETECTION_FINDING"
+        AND (
+          dt.security.risk.level == "HIGH" OR
+          dt.security.risk.level == "CRITICAL"
+        )
+        AND (
+          isNotNull(k8s.pod.cloud_app_id) OR
+          isNotNull(dt.entity.kubernetes_cluster)
+        )
+      isActive: false
+      uniqueExpression: null
+      triggerConfiguration:
+        type: event
+        value:
+          query: |-
+            event.type == "DETECTION_FINDING"
+            AND (
+              dt.security.risk.level == "HIGH" OR
+              dt.security.risk.level == "CRITICAL"
+            )
+            AND (
+              isNotNull(k8s.pod.cloud_app_id) OR
+              isNotNull(dt.entity.kubernetes_cluster)
+            )
+          eventType: security.events
+  schemaVersion: 3
+  result: null
+  input: {}
+  hourlyExecutionLimit: 1000
+  type: STANDARD
