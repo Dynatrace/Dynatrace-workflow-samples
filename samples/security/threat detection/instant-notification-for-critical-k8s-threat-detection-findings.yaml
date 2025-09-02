@@ -3,9 +3,9 @@ metadata:
   dependencies:
     apps:
       - id: dynatrace.automations
-        version: ^1.2109.0
+        version: ^1.2075.0
       - id: dynatrace.ownership
-        version: ^1.7.26
+        version: ^1.7.24
   inputs: []
 workflow:
   title: Instant Notification for Critical K8s Detection Findings
@@ -94,6 +94,7 @@ workflow:
       conditions:
         states:
           get_impacted_component_owners: OK
+        custom: '{{result("get_impacted_component_owners")["owners"] | length > 0}}'
     trigger_notification_sender:
       name: trigger_notification_sender
       description: Modularize your workflows, run any existing workflow.
@@ -115,11 +116,19 @@ workflow:
       action: dynatrace.ownership:get-ownership-from-entity
       active: true
       input:
-        entityIds: |-
-          {% if event()["k8s.pod.cloud_app_id"] | length > 0 %}
+        entityIds: >-
+          {% if "k8s.pod.cloud_app_id" in event() and
+          event()["k8s.pod.cloud_app_id"] | length > 0 %}
+
           {{ event()["k8s.pod.cloud_app_id"] }}
-          {% else %}
+
+          {% endif %}
+
+          {% if "dt.entity.kubernetes_cluster" in event() and
+          event()["dt.entity.kubernetes_cluster"] | length > 0 %}
+
           {{ event()["dt.entity.kubernetes_cluster"] }}
+
           {% endif %}
         responsibilities:
           - Security
@@ -129,6 +138,9 @@ workflow:
       predecessors: []
       conditions:
         states: {}
+        custom: '{{"k8s.pod.cloud_app_id" in event() or "dt.entity.kubernetes_cluster"
+          in event()}}'
+        else: STOP
   description: ""
   trigger:
     eventTrigger:
@@ -137,6 +149,10 @@ workflow:
         AND (
           dt.security.risk.level == "HIGH" OR
           dt.security.risk.level == "CRITICAL"
+        )
+        AND (
+          isNotNull(k8s.pod.cloud_app_id) OR
+          isNotNull(dt.entity.kubernetes_cluster)
         )
       isActive: false
       uniqueExpression: null
@@ -148,6 +164,10 @@ workflow:
             AND (
               dt.security.risk.level == "HIGH" OR
               dt.security.risk.level == "CRITICAL"
+            )
+            AND (
+              isNotNull(k8s.pod.cloud_app_id) OR
+              isNotNull(dt.entity.kubernetes_cluster)
             )
           eventType: security.events
   schemaVersion: 3
