@@ -27,9 +27,9 @@ workflow:
 
           // before the current 24hr window will not be reported again.
 
-          fetch events, from: now() - 7d
+          fetch security.events, from: now() - 7d
 
-          | filter dt.system.bucket == "default_security_custom_events"
+          | filter dt.system.bucket == "default_securityevents"
               AND event.kind == "SECURITY_EVENT"
               AND object.type == "CONTAINER_IMAGE"
               AND event.type == "VULNERABILITY_FINDING"
