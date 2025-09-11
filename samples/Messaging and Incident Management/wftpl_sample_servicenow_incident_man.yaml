@@ -99,10 +99,6 @@ workflow:
           Event name: {{ event()["event.name"] }}
           Event category: {{ event()["event.category"] }} 
 
-          Service: {{result("enrich_descriptions.service_url")}}
-          Problem: {{result("enrich_descriptions.problem_url")}}
-          Notebook: {{result("enrich_descriptions.notebook_triage")}}
-
           Logs:
           {% for log in result("get_logs").records %}
             - {{ log.content }}
@@ -154,11 +150,9 @@ workflow:
         x: 0
         y: 6
       predecessors:
-        - enrich_descriptions
         - estimate_problem_urgency
       conditions:
         states:
-          enrich_descriptions: OK
           estimate_problem_urgency: OK
     get_problem_impact:
       name: get_problem_impact
@@ -250,42 +244,6 @@ workflow:
       conditions:
         states:
           get_cmdb_ci: OK
-    enrich_descriptions:
-      name: enrich_descriptions
-      description: Run custom JavaScript code.
-      action: dynatrace.automations:run-javascript
-      input:
-        script: >-
-          // optional import of sdk modules
-
-          import { execution } from '@dynatrace-sdk/automation-utils';
-
-
-          export default async function ({ executionId }) {
-            const ex = await execution(executionId);
-            
-            console.log('Automated script execution on behalf of', ex.trigger);
-
-            
-            const obj = 
-              {
-                 service_url : 'https://guu84124.apps.dynatrace.com/ui/apps/dynatrace.services/explorer?detailsId=SERVICE-26D9443709C29EFC',
-                 problem_url : 'https://guu84124.apps.dynatrace.com/ui/apps/dynatrace.davis.problems/problem/-6298967890203438442_1742835180000V2',
-                 notebook_triage : 'https://guu84124.apps.dynatrace.com/ui/apps/dynatrace.notebooks/notebook/d2ba0d21-4848-410b-88fa-315a51d5ac1c'
-              }
-            
-            return obj;
-
-              
-          }
-      position:
-        x: 1
-        y: 5
-      predecessors:
-        - get_problem_impact
-      conditions:
-        states:
-          get_problem_impact: OK
     comment_on_an_incident:
       name: comment_on_an_incident
       description: Comment on an incident in ServiceNow
@@ -384,7 +342,7 @@ workflow:
         maintenance.is_under_maintenance == false
 
         ) AND (matchesValue(entity_tags, "ServiceNow*"))
-      isActive: true
+      isActive: false
       uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
         event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
         "REFRESHED") else "resolved" }}-{{
