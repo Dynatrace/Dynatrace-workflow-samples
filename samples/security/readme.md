@@ -15,6 +15,11 @@ You can trigger a workflow in 2 different ways:
 1. Per change event - using the workflow trigger for every new vulnerability event reported on the granularity of the affected entity (for example, vulnerability A per process group B). This approach will trigger immediately as soon as the triggering event appears.
 2. Periodical trigger - using the periodical query for events in the past time period. This approach allows you to perform aggregations and a better deduplication of notifications.
 
+### Security.events table migration
+
+With June 2026 all builtin security events were moved to a separate grail table. Customers are expected to also change the destination of externally ingested events. The samples in this folder use the ´security.events´ table as a datasource.  
+For further information see the [security.events table migration guide](https://docs.dynatrace.com/docs/secure/threat-observability/migration).
+
 ## Sample Workflows for Dynatrace-generated Security Events
 * `ms_teams_send_critical_vulnerabilities_per_affected_entity.yaml` - MS Teams notification for new critical vulnerabilities per affected entity (static channel assignment).
 * `slack_send_critical_vulnerabilities_per_host.yaml` - Slack notification for new critical vulnerabilities aggregated per host (static channel assignment).
