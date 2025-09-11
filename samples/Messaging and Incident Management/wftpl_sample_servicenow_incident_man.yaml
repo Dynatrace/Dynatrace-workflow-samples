@@ -1,0 +1,412 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.2109.0
+      - id: dynatrace.email
+        version: ^1.6.0
+      - id: dynatrace.ownership
+        version: ^1.7.24
+      - id: dynatrace.servicenow
+        version: ^2.1.0
+  inputs:
+    - type: connection
+      schema: app:dynatrace.servicenow:connection
+      targets:
+        - tasks.get_cmdb_ci.connectionId
+        - tasks.create_incident.connectionId
+        - tasks.search_incidents.connectionId
+        - tasks.comment_on_an_incident.connectionId
+workflow:
+  title: (Sample) ServiceNow Incident Management
+  tasks:
+    get_logs:
+      name: get_logs
+      description: Executes DQL query
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch logs
+          | filter dt.entity.host  == "{{ event()["dt.entity.host"][0] }}"
+          | limit 10
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+      conditions:
+        states: {}
+    get_cmdb_ci:
+      name: get_cmdb_ci
+      description: Search in ServiceNow
+      action: dynatrace.servicenow:snow-search
+      input:
+        table: "{{ 'cmdb_ci' }}"
+        connectionId: ""
+        sysparmLimit: "1000"
+        sysparmQuery: correlation_id={{event()["root_cause_entity_id"]}}
+        sysparmFields: ""
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get_logs
+      conditions:
+        states:
+          get_logs: OK
+    send_message:
+      name: send_message
+      description: Send email
+      action: dynatrace.email:send-email
+      active: true
+      input:
+        cc: []
+        to:
+          - '{{result("get_supportgroup").email[0]["email"]}}'
+        bcc: []
+        taskId: "{{ task().id }}"
+        content: |
+          Event : {{ event()["event.name"] }}, {{ event()["event.kind"] }}
+          ServiceNow incident created: {{ result("create_incident").url }}
+        subject: TestEmail SNOW {{event()["event.id"]}}
+        executionId: "{{ execution().id }}"
+        environmentUrl: https://umsaywsjuo.dev.apps.dynatracelabs.com
+      position:
+        x: 0
+        y: 9
+      predecessors:
+        - create_incident
+        - comment_on_an_incident
+      conditions:
+        states:
+          create_incident: OK
+          comment_on_an_incident: OK
+    create_incident:
+      name: create_incident
+      description: Create an incident in ServiceNow
+      action: dynatrace.servicenow:snow-create-incident
+      active: true
+      input:
+        group:
+          id: '{{ result("get_supportgroup").owners[0].externalId }}'
+          displayName: '{{ result("get_supportgroup").owners[0].externalId }}'
+        caller: "dt_demo "
+        impact: "3"
+        urgency: '{{ result("estimate_problem_urgency") }}'
+        category: inquiry
+        description: |-
+          Host: {{ event()["dt.entity.host"] }} 
+          Event name: {{ event()["event.name"] }}
+          Event category: {{ event()["event.category"] }} 
+
+          Service: {{result("enrich_descriptions.service_url")}}
+          Problem: {{result("enrich_descriptions.problem_url")}}
+          Notebook: {{result("enrich_descriptions.notebook_triage")}}
+
+          Logs:
+          {% for log in result("get_logs").records %}
+            - {{ log.content }}
+          {% endfor %}
+        subCategory: internal application
+        connectionId: ""
+        correlationId: DT_{{ event()["event.id"] }}
+        shortDescription: Event {{ event()["event.category"] }} Category {{
+          event()["event.name"] }}
+        configurationItem: '{{result("get_cmdb_ci")[0]["sys_id"]}}'
+      position:
+        x: 1
+        y: 7
+      predecessors:
+        - search_incidents
+      conditions:
+        states:
+          search_incidents: OK
+        custom: '{{ result("search_incidents") | length == 0}}'
+        else: SKIP
+    get_supportgroup:
+      name: get_supportgroup
+      description: Retrieves entity and extracts ownership data from it.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityIds: '{{event()["root_cause_entity_id"]}}'
+        responsibilities:
+          - Infrastructure
+        selectedTeamIdentifiers: []
+      position:
+        x: 0
+        y: 3
+      predecessors:
+        - get_cmdb_ci
+      conditions:
+        states:
+          get_cmdb_ci: OK
+    search_incidents:
+      name: search_incidents
+      description: Search for incidents in ServiceNow
+      action: dynatrace.servicenow:snow-search-incidents
+      active: true
+      input:
+        connectionId: ""
+        sysparmLimit: "100"
+        sysparmQuery: correlation_id=DT_hallotestalwaysffail
+        sysparmFields: ""
+      position:
+        x: 0
+        y: 6
+      predecessors:
+        - enrich_descriptions
+        - estimate_problem_urgency
+      conditions:
+        states:
+          enrich_descriptions: OK
+          estimate_problem_urgency: OK
+    get_problem_impact:
+      name: get_problem_impact
+      description: Run custom JavaScript code.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          import { problemsClient } from
+          '@dynatrace-sdk/client-classic-environment-v2';
+
+
+          export default async function ({ execution_id }) {
+            // get execution and event from execution (assuming this code runs with a Davis Problem Trigger)
+            const ex = await execution(execution_id);
+            const davisEvent = ex.event();
+            /** Example: {
+              "event.id": "-1612920186620964634_1721382540000V2",
+              timestamp: "2024-07-19T09:55:58.917000000Z",
+              display_id: "P-240733209",
+              "event.kind": "DAVIS_PROBLEM",
+              "event.name": "Response time degradation",
+              entity_tags: [],
+              "event.start": "2024-07-19T09:54:00.000000000Z",
+              "event.status": "ACTIVE",
+              "event.category": "SLOWDOWN",
+              "dt.davis.event_ids": [ "-1612920186620964634_1721382540000" ],
+              affected_entity_ids: [ "SERVICE-XXXXXXXXXX" ],
+              "dt.davis.mute.status": "NOT_MUTED",
+              affected_entity_types: [ "dt.entity.service" ],
+              "dt.davis.is_duplicate": false,
+              "event.status_transition": "UPDATED",
+              "dt.davis.is_frequent_event": false,
+              "maintenance.is_under_maintenance": false
+            }*/
+
+            // get problem details
+            const problemDetails = await problemsClient.getProblem(
+              {problemId: davisEvent['event.id'], fields: 'impactAnalysis'}
+            );
+            /** contains
+            * affectedEntities
+            * displayId
+            * endTime
+            * entityTags
+            * impactAnalysis
+            *** impacts: [{estimatedAffectedUsers, impactType, impactedEntity: {entityId, name}}}
+            * impactLevel (e.g., SERVICES)
+            * impactedEntities: [{ entitityId, name }]
+            * managementZones
+            * problemFilters
+            * problemId
+            * severityLevel (e.g., PERFORMANCE)
+            * startTime
+            * status (e.g., CLOSED)
+            * title
+            **/
+            console.log(problemDetails);  
+            // collect estimatedAffectedUsers
+            let estimatedAffectedUsers = 0;
+
+            
+
+            problemDetails.impactAnalysis.impacts.forEach(
+              (impact) => {
+                estimatedAffectedUsers += impact.estimatedAffectedUsers;  
+              }
+            );
+
+            return {
+              problemId: problemDetails.problemId,
+              problemTitle: problemDetails.title,
+              problemStatus: problemDetails.status,
+              affectedEntities: problemDetails.affectedEntities,
+              numAffectedEntities: problemDetails.affectedEntities.length,
+              impactLevel: problemDetails.impactLevel, 
+              impactedEntities: problemDetails.impactedEntities, 
+              numImpactedEntities: problemDetails.impactedEntities.length,
+              severityLevel: problemDetails.severityLevel,
+              estimatedAffectedUsers: estimatedAffectedUsers
+            };
+          }
+      position:
+        x: 0
+        y: 4
+      predecessors:
+        - get_cmdb_ci
+      conditions:
+        states:
+          get_cmdb_ci: OK
+    enrich_descriptions:
+      name: enrich_descriptions
+      description: Run custom JavaScript code.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          // optional import of sdk modules
+
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+
+          export default async function ({ executionId }) {
+            const ex = await execution(executionId);
+            
+            console.log('Automated script execution on behalf of', ex.trigger);
+
+            
+            const obj = 
+              {
+                 service_url : 'https://guu84124.apps.dynatrace.com/ui/apps/dynatrace.services/explorer?detailsId=SERVICE-26D9443709C29EFC',
+                 problem_url : 'https://guu84124.apps.dynatrace.com/ui/apps/dynatrace.davis.problems/problem/-6298967890203438442_1742835180000V2',
+                 notebook_triage : 'https://guu84124.apps.dynatrace.com/ui/apps/dynatrace.notebooks/notebook/d2ba0d21-4848-410b-88fa-315a51d5ac1c'
+              }
+            
+            return obj;
+
+              
+          }
+      position:
+        x: 1
+        y: 5
+      predecessors:
+        - get_problem_impact
+      conditions:
+        states:
+          get_problem_impact: OK
+    comment_on_an_incident:
+      name: comment_on_an_incident
+      description: Comment on an incident in ServiceNow
+      action: dynatrace.servicenow:snow-comment-on-incident
+      active: true
+      input:
+        number: '{result("search_incident").number}}'
+        comment: |
+          Host: {{ event()["dt.entity.host"] }} 
+          Event name: {{ event()["event.name"] }}
+          Event category: {{ event()["event.category"] }} 
+
+          Host: {{event()["custom.host.url"]}}
+          Problem: {{ event()["custom.problem.url"] }}
+          Notebook: {{ event()["custom.notebook.url"] }}
+
+          Logs:
+          {% for log in result("get_logs").records %}
+            - {{ log.content }}
+          {% endfor %}
+        connectionId: ""
+      position:
+        x: -1
+        y: 7
+      predecessors:
+        - search_incidents
+      conditions:
+        states:
+          search_incidents: OK
+        custom: '{{ result("search_incidents") | length > 0}}'
+        else: SKIP
+    estimate_problem_urgency:
+      name: estimate_problem_urgency
+      description: Run custom JavaScript code.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: >-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const problemImpact = await ex.result("get_problem_impact");
+            console.log(problemImpact);
+            /** Example:
+            {
+            "problemId": "-1612920186620964634_1721382540000V2",
+            "impactLevel": "SERVICES",
+            "problemTitle": "Response time degradation",
+            "problemStatus": "CLOSED",
+            "severityLevel": "PERFORMANCE",
+            "affectedEntities": [],
+            "impactedEntities": [],
+            "numAffectedEntities": 1,
+            "numImpactedEntities": 1,
+            "estimatedAffectedUsers": 8
+          }
+
+          */
+
+            // feel free to fine-tune below
+            if (problemImpact.estimatedAffectedUsers >= 5) {
+              return "1"; // 1 - High
+            }
+
+            if (problemImpact.numAffectedEntities >= 2 || problemImpact.numImpactedEntities >= 2 || problemImpact.estimatedAffectedUsers >= 2) {
+              return "2"; // 2 - Medium
+            }
+
+            /*if (problemImpact.numAffectedEntities >= 1 || problemImpact.numImpactedEntities >= 1 || problemImpact.estimatedAffectedUsers >= 1) {
+              return "2";
+            }*/
+
+            // Default:
+            return "1"; // 1 - Low
+          }
+      position:
+        x: 0
+        y: 5
+      predecessors:
+        - get_problem_impact
+      conditions:
+        states:
+          get_problem_impact: OK
+  description: ""
+  trigger:
+    eventTrigger:
+      filterQuery: >-
+        event.kind == "DAVIS_PROBLEM" AND event.status == "ACTIVE" AND
+        (event.status_transition == "CREATED" OR event.status_transition ==
+        "UPDATED" OR event.status_transition == "REOPENED") AND (event.category
+        == "AVAILABILITY" OR event.category == "ERROR" OR event.category ==
+        "SLOWDOWN" OR event.category == "RESOURCE_CONTENTION") AND
+        (isNotNull(root_cause_entity_id) and
+
+        maintenance.is_under_maintenance == false
+
+        ) AND (matchesValue(entity_tags, "ServiceNow*"))
+      isActive: true
+      uniqueExpression: '{{ event()["event.id"] }}-{{ "open" if
+        event()["event.status_transition"] in ("CREATED", "UPDATED", "REOPENED",
+        "REFRESHED") else "resolved" }}-{{
+        event()["dt.davis.last_reopen_timestamp"] }}'
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            resource: true
+            slowdown: true
+            availability: true
+          entityTags:
+            ServiceNow:
+              - ""
+          customFilter: |
+            isNotNull(root_cause_entity_id) and
+            maintenance.is_under_maintenance == false
+          onProblemClose: false
+          entityTagsMatch: all
+  schemaVersion: 3
+  result: null
+  input: {}
+  hourlyExecutionLimit: 1000
+  type: STANDARD
