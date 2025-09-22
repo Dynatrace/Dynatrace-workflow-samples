@@ -17,7 +17,7 @@ You can trigger a workflow in 2 different ways:
 
 ### Security.events table migration
 
-With June 2026 all builtin security events were moved to a separate grail table. Customers are expected to also change the destination of externally ingested events. The samples in this folder use the ´security.events´ table as a datasource.  
+With June 2025 all builtin security events were moved to a separate grail table. Customers are expected to also change the destination of externally ingested events. The samples in this folder use the ´security.events´ table as a datasource.  
 For further information see the [security.events table migration guide](https://docs.dynatrace.com/docs/secure/threat-observability/migration).
 
 ## Sample Workflows for Dynatrace-generated Security Events
