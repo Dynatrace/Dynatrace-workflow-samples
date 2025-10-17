@@ -10,3 +10,4 @@ The focus of this WF sample is to demonstrate the opening and closing logic for 
 
 All other aspects of the WF are intentionally kept basic (using WF ServiceNow task defaults), to help you get started as quickly as possible after importing this WF. This WF sample can then be expanded further based on your requirements.
 
+![SNOW_logic_close](https://github.com/user-attachments/assets/c9ea4c6e-88f8-4b9d-823d-36eb455ca864)
