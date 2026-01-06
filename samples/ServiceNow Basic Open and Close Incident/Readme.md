@@ -1,7 +1,7 @@
 **Workflow (WF) to demonstrate basic logic for opening and closing ServiceNow incidents:**
 - WF will be triggered on problem open and close. 
 - Task `A`: Search if SNOW incident already exists in SNOW
-- Task `B`: If SNOW incident does not exist AND new Problem (`event.status = OPEN`) ---> create new incident in SNOW
+- Task `B`: If SNOW incident does not exist AND Problem is not closed (`event.status != CLOSED`) ---> create new incident in SNOW
 - Task `C`: If SNOW incident does exist AND Problem was closed in DT (`event.status = CLOSED`) ---> resolve incident in SNOW
 
 The focus of this WF sample is to demonstrate the opening and closing logic for ServiceNow incidents with conditional Jinja expressions:
