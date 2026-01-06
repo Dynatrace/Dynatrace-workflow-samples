@@ -21,7 +21,7 @@
         "y": 2
       },
       "conditions": {
-        "custom": "{% set search_result_count = result(\"search_incidents\") | length %}\n{% set event_status = event()[\"event.status\"] %}\n{{ search_result_count == 0 and event_status != \"CLOSED\"}}",
+        "custom": "{% set search_result_count = result(\"search_incidents\") | length %}\n{% set event_status = event()[\"event.status\"] %}\n{{ search_result_count == 0 and event_status == \"OPEN\"}}",
         "states": {
           "search_incidents": "OK"
         }
