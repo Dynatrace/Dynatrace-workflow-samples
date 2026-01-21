@@ -1,0 +1,81 @@
+metadata:
+  version: "1"
+  dependencies:
+    apps:
+      - id: dynatrace.automations
+        version: ^1.2450.0
+  inputs: []
+workflow:
+  title: AlienVault threat intelligence pulses analysis [parent-workflow]
+  tasks:
+    analyze-alert:
+      name: analyze-alert
+      description: Modularize your workflows, run any existing workflow.
+      action: dynatrace.automations:run-workflow
+      active: true
+      input:
+        workflowInput: "{{_.pulse}}"
+      position:
+        x: 0
+        y: 2
+      predecessors:
+        - get-alienvault-pulses
+      conditions:
+        states:
+          get-alienvault-pulses: OK
+      concurrency: 1
+      withItems: pulse in {{(result("get-alienvault-pulses")["body"] |
+        from_json)['results']}}
+    get-alienvault-pulses:
+      name: get-alienvault-pulses
+      description: Issue an HTTP request to any API.
+      action: dynatrace.automations:http-function
+      active: true
+      input:
+        url: https://otx.alienvault.com/api/v1/pulses/subscribed
+        method: GET
+        failOnResponseCodes: 400-599
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+  description: ""
+  trigger: {}
+  schemaVersion: 3
+  result: null
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: >-
+    # AlienVault threat intelligence pulses analysis [parent-workflow]
+
+
+    This workflow queries AlienVault pulses and analyze each pulse and all the
+    related indicators of compromise with Dynatrace to determine threat exposure
+    risk.
+
+
+    # Prerequisites
+
+
+    * This workflow should be triggered as a parent-workflow with a sub-workflow
+    selected to perform the threat alert processing.
+
+
+    # How to Setup
+
+
+    1. After deploying the workflow, specify or select API token for the
+    AlienVault authentication in
+    [`get-alienvault-pulses`](?task=get-alienvault-pulses&tab=input) task.
+
+    2. Select the sub-agent in [`analyze-alert`](?task=analyze-alert&tab=input)
+    task.
+
+
+    # Workflow flow
+
+
+    1. Threat pulses user subscribed to get queried from AlienVault.
+
+    2. Each pulse passed as an input to a sub-workflow to process them.
+  type: STANDARD
