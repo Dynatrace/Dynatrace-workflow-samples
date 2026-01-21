@@ -49,7 +49,7 @@ workflow:
     # AlienVault threat intelligence pulses analysis [parent-workflow]
 
 
-    This workflow queries AlienVault pulses and analyze each pulse and all the
+    This workflow queries AlienVault pulses and analyzes each pulse and all the
     related indicators of compromise with Dynatrace to determine threat exposure
     risk.
 
