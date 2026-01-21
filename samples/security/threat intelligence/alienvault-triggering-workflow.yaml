@@ -75,7 +75,7 @@ workflow:
     # Workflow flow
 
 
-    1. Threat pulses user subscribed to get queried from AlienVault.
+    1. The workflow queries threat pulses that user is subscribed to from AlienVault.
 
     2. Each pulse passed as an input to a sub-workflow to process them.
   type: STANDARD
