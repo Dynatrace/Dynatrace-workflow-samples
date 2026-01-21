@@ -68,7 +68,7 @@ workflow:
     AlienVault authentication in
     [`get-alienvault-pulses`](?task=get-alienvault-pulses&tab=input) task.
 
-    2. Select the sub-agent in [`analyze-alert`](?task=analyze-alert&tab=input)
+    2. Select the sub-workflow in [`analyze-alert`](?task=analyze-alert&tab=input)
     task.
 
 
