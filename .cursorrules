@@ -1,0 +1,11 @@
+# Cursor AI Instructions for Dynatrace Workflows
+
+For comprehensive Dynatrace Workflow guidelines, see:
+.github/copilot-instructions.md
+
+This file contains detailed instructions for creating syntactically correct Dynatrace Workflows in all three formats:
+1. Workflow Templates (YAML) - UI import/export
+2. API Format (JSON) - Programmatic management  
+3. Terraform - Configuration-as-Code
+
+Always refer to that file when working with Dynatrace Workflows to ensure correct syntax and structure.
