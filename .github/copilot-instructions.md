@@ -476,7 +476,7 @@ workflow:
         cron: "0 * * * *"  # Every hour
       timezone: "UTC"
       isActive: true
-    isFaulty: false
+      isFaulty: false
   
   schemaVersion: 3
 ```
