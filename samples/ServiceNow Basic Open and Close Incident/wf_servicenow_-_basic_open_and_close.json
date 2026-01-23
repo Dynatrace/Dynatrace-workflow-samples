@@ -1,0 +1,108 @@
+{
+  "id": "5aded663-28ed-4612-9258-313964ccb60e",
+  "title": "ServiceNow - Basic Open & Close Incident",
+  "tasks": {
+    "create_incident": {
+      "name": "create_incident",
+      "input": {
+        "caller": "admin",
+        "impact": "3",
+        "urgency": "3",
+        "category": "inquiry",
+        "description": "Event details: {{ event() }}",
+        "subCategory": "internal application",
+        "connectionId": "vu9U3hXa3q0AAAABACNhcHA6ZHluYXRyYWNlLnNlcnZpY2Vub3c6Y29ubmVjdGlvbgAGdGVuYW50AAZ0ZW5hbnQAJGU1NmRjZmEyLTYyM2YtMzBkOC1iODgwLTg2NmQxYmE1MTBhOb7vVN4V2t6t",
+        "correlationId": "DT_{{ event()[\"event.id\"] }}",
+        "shortDescription": "{{ event()[\"event.category\"] }} {{ event()[\"event.name\"] }}"
+      },
+      "action": "dynatrace.servicenow:snow-create-incident",
+      "position": {
+        "x": -1,
+        "y": 2
+      },
+      "conditions": {
+        "custom": "{% set search_result_count = result(\"search_incidents\") | length %}\n{% set event_status = event()[\"event.status\"] %}\n{{ search_result_count == 0 and event_status == \"OPEN\"}}",
+        "states": {
+          "search_incidents": "OK"
+        }
+      },
+      "description": "Create an incident in ServiceNow",
+      "predecessors": [
+        "search_incidents"
+      ]
+    },
+    "resolve_incident": {
+      "name": "resolve_incident",
+      "input": {
+        "number": "{{ result('search_incidents')[0].number }}",
+        "connectionId": "vu9U3hXa3q0AAAABACNhcHA6ZHluYXRyYWNlLnNlcnZpY2Vub3c6Y29ubmVjdGlvbgAGdGVuYW50AAZ0ZW5hbnQAJGU1NmRjZmEyLTYyM2YtMzBkOC1iODgwLTg2NmQxYmE1MTBhOb7vVN4V2t6t",
+        "resolutionCode": "Closed/Resolved by Caller",
+        "resolutionNotes": "Incident resolved via Dynatrace ServiceNow Workflow"
+      },
+      "action": "dynatrace.servicenow:snow-resolve-incident",
+      "position": {
+        "x": 1,
+        "y": 2
+      },
+      "conditions": {
+        "custom": "{% set search_result_count = result(\"search_incidents\") | length %}\n{% set event_status = event()[\"event.status\"] %}\n{{ search_result_count > 0 and event_status == \"CLOSED\"}}",
+        "states": {
+          "search_incidents": "OK"
+        }
+      },
+      "description": "Resolve an incident in ServiceNow",
+      "predecessors": [
+        "search_incidents"
+      ]
+    },
+    "search_incidents": {
+      "name": "search_incidents",
+      "input": {
+        "connectionId": "vu9U3hXa3q0AAAABACNhcHA6ZHluYXRyYWNlLnNlcnZpY2Vub3c6Y29ubmVjdGlvbgAGdGVuYW50AAZ0ZW5hbnQAJGU1NmRjZmEyLTYyM2YtMzBkOC1iODgwLTg2NmQxYmE1MTBhOb7vVN4V2t6t",
+        "sysparmLimit": "100",
+        "sysparmQuery": "correlation_id=DT_{{ event()[\"event.id\"] }}",
+        "sysparmFields": ""
+      },
+      "action": "dynatrace.servicenow:snow-search-incidents",
+      "position": {
+        "x": 0,
+        "y": 1
+      },
+      "description": "Search for incidents in ServiceNow",
+      "predecessors": []
+    }
+  },
+  "description": "",
+  "actor": "cc3fb42f-a454-4cfd-a034-49d082fb9ca8",
+  "owner": "cc3fb42f-a454-4cfd-a034-49d082fb9ca8",
+  "ownerType": "USER",
+  "isPrivate": true,
+  "trigger": {
+    "eventTrigger": {
+      "isActive": true,
+      "filterQuery": "event.kind == \"DAVIS_PROBLEM\" AND (event.category == \"MONITORING_UNAVAILABLE\" OR event.category == \"AVAILABILITY\" OR event.category == \"ERROR\" OR event.category == \"SLOWDOWN\" OR event.category == \"RESOURCE_CONTENTION\" OR event.category == \"CUSTOM_ALERT\")",
+      "uniqueExpression": "{{ event()[\"event.id\"] }}-{{ \"open\" if event()[\"event.status_transition\"] in (\"CREATED\", \"UPDATED\", \"REOPENED\", \"REFRESHED\") else \"resolved\" }}-{{ event()[\"dt.davis.last_reopen_timestamp\"] }}",
+      "triggerConfiguration": {
+        "type": "davis-problem",
+        "value": {
+          "categories": {
+            "error": true,
+            "custom": true,
+            "resource": true,
+            "slowdown": true,
+            "availability": true,
+            "monitoringUnavailable": true
+          },
+          "entityTags": {},
+          "customFilter": "",
+          "onProblemClose": true
+        }
+      }
+    }
+  },
+  "schemaVersion": 3,
+  "result": null,
+  "input": {},
+  "hourlyExecutionLimit": 1000,
+  "type": "STANDARD"
+}
