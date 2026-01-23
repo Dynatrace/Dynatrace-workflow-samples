@@ -11,10 +11,11 @@ To get started please have a look into [Dynatrace AutomationEngine](https://www.
 
 ## AI Assistant Instructions
 
-If you're using GitHub Copilot, Cursor, Kiro, or other AI coding assistants to generate Dynatrace Workflows, comprehensive instructions are available in [.github/copilot-instructions.md](.github/copilot-instructions.md). This guide covers:
+If you're using GitHub Copilot, Cursor, Claude Code, Kiro, or other AI coding assistants to generate Dynatrace Workflows, comprehensive instructions are available in [AGENTS.md](AGENTS.md). This guide covers:
 - Workflow syntax and structure for all three formats (YAML templates, API JSON, Terraform)
 - Common workflow actions and patterns
 - Template expressions (Jinja2)
+- Pull request review guidelines
 - Best practices and troubleshooting
 - Complete examples
 
