@@ -1,0 +1,222 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2538.1
+    - id: dynatrace.jira
+      version: ^5.6.3
+  inputs:
+  - type: connection
+    schema: app:dynatrace.jira:connection
+    targets:
+    - tasks.create-new-ticket.connectionId
+    - tasks.search-already-existing-ticket.connectionId
+workflow:
+  title: Create Jira ticket for verified host vulnerabilities
+  description: ''
+  schemaVersion: 3
+  trigger:
+    eventTrigger:
+      isActive: true
+      filterQuery: 'dt.system.bucket=="default_securityevents"
+
+        and event.type=="VULNERABILITY_FINDING"
+
+        and object.type=="HOST"
+
+        and (dt.security.risk.level=="CRITICAL" OR dt.security.risk.level=="HIGH")'
+      uniqueExpression: null
+      triggerConfiguration:
+        type: event
+        value:
+          query: 'dt.system.bucket=="default_securityevents"
+
+            and event.type=="VULNERABILITY_FINDING"
+
+            and object.type=="HOST"
+
+            and (dt.security.risk.level=="CRITICAL" OR dt.security.risk.level=="HIGH")'
+          eventType: security.events
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: null
+  tasks:
+    create-new-ticket:
+      name: create-new-ticket
+      input:
+        labels: '{{ [result("filter-runtime-impact-only").records[0]["jira_label"]
+          ] }}'
+        project:
+          id: '10000'
+        summary: A {{result("filter-runtime-impact-only").records[0]["dt.security.risk.level"]}}
+          vulnerability has been detected and confirmed on a monitored host {{ result("filter-runtime-impact-only").records[0]["host.entity.name"]}}
+        assignee:
+          id: 712020:aaf417eb-62d6-4fe1-8c45-9f7effc2bee6
+        reporter:
+          id: 712020:aaf417eb-62d6-4fe1-8c45-9f7effc2bee6
+        issueType:
+          id: '10004'
+        components: []
+        description: "h2. Vulnerability Details\n\n*Title*: {{event()[\"vulnerability.title\"\
+          ]}}\n\n*Risk Level*: {{event()[\"dt.security.risk.level\"]}} ({{event()[\"\
+          dt.security.risk.score\"]}})\n\n*CVEs*: {{event()[\"vulnerability.references.cve\"\
+          ]}}\n\n*Description*: \n{{event()[\"vulnerability.description\"]}}\n\n*Remediation*:\n\
+          {{event()[\"vulnerability.remediation.description\"] }}\n\nh2. Host details\n\
+          \n*Host*: {{result(\"filter-runtime-impact-only\").records[0][\"host.entity.name\"\
+          ]}} ({{result(\"filter-runtime-impact-only\").records[0][\"dt.entity.host\"\
+          ]}})\n\n*IPs*:  {{event()[\"host.ip\"]}}\n\n*FQDNs*: {{event()[\"host.fqdn\"\
+          ]}}"
+        connectionId: ''
+        fieldSetters: []
+      action: dynatrace.jira:jira-create-issue
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          search-already-existing-ticket: OK
+      description: Create new Jira issue with various fields
+      predecessors:
+      - search-already-existing-ticket
+    filter-runtime-impact-only:
+      name: filter-runtime-impact-only
+      input:
+        query: "data json:\"\"\"{{ event() | to_json | replace(\"dt.system\",\"dtsystem\"\
+          )}}\"\"\"\n| fieldsAdd vulnerability.references.cve=arrayDistinct(vulnerability.references.cve)\n\
+          | expand host.ip\n// enrich the runtime context\n| join [\n    fetch dt.entity.host,\
+          \ from:now()-1h\n    | expand ipAddress\n], on:{right[ipAddress]==left[host.ip]},\
+          \ \n   fields:{dt.entity.host=id, host.entity.name=entity.name}\n| dedup\
+          \ {dt.entity.host}\n| fieldsAdd jira_label=concat(vulnerability.id,\"::\"\
+          , dt.entity.host)\n"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+      customSampleResult:
+        records:
+        - host.ip: 172.31.20.43
+          os.name: Ubuntu Linux 24.04.3
+          scan.id: QAGENT/1092828721/2026-01-28T11:55:26
+          event.id: 5c4becfb-869e-4017-b505-180275673bb2
+          host.fqdn: ip-172-31-20-43.ec2.internal
+          host.name: ip-172-31-20-43
+          object.id: '1092828721'
+          scan.name: QAGENT Vulnerability Scan of 172.31.20.43
+          timestamp: '2026-01-28T12:44:27.599000000Z'
+          event.kind: SECURITY_EVENT
+          event.name: Vulnerability finding event
+          event.type: VULNERABILITY_FINDING
+          finding.id: '11400946085'
+          jira_label: 6025501::HOST-BEFE2208FA9CC7B5
+          finding.url: https://qualysguard.qg2.apps.qualys.com/vm/#/vulndetails/61801315765
+          object.name: ip-172-31-20-43
+          object.type: HOST
+          finding.type: Ubuntu vulnerability
+          product.name: Vulnerability Management, Detection & Response
+          event.version: '1.309'
+          finding.score: '95'
+          finding.title: Ubuntu Security Notification for Linux kernel Vulnerabilities
+            (USN-7769-3) found on ip-172-31-20-43
+          component.name: linux
+          dt.entity.host: HOST-BEFE2208FA9CC7B5
+          event.category: VULNERABILITY_MANAGEMENT
+          event.provider: Qualys
+          product.vendor: Qualys
+          finding.severity: CRITICAL
+          host.entity.name: ip-172-31-20-43.ec2.internal
+          vulnerability.id: '6025501'
+          event.description: Vulnerability Ubuntu Security Notification for Linux
+            kernel Vulnerabilities (USN-7769-3) was found on ip-172-31-20-43
+          finding.description: "Package\tInstalled Version\tRequired Version\nlinux\t\
+            6.14.0-1011-aws\t6.14.0-1013"
+          vulnerability.title: Ubuntu Security Notification for Linux kernel Vulnerabilities
+            (USN-7769-3)
+          finding.time.created: '2026-01-28T11:55:26.000000000Z'
+          dt.openpipeline.source: /platform/ingest/v1/security.events
+          dt.security.risk.level: CRITICAL
+          dt.security.risk.score: 9.5
+          event.original_content: "<?xml version='1.0' encoding='utf8'?>\n<DETECTION>\n\
+            \            <UNIQUE_VULN_ID>11400946085</UNIQUE_VULN_ID>\n          \
+            \  <QID>6025501</QID>\n            <TYPE>Confirmed</TYPE>\n          \
+            \  <SEVERITY>4</SEVERITY>\n            <SSL>0</SSL>\n            <RESULTS>Package\t\
+            Installed Version\tRequired Version\nlinux\t6.14.0-1011-aws\t6.14.0-1013</RESULTS>\n\
+            \            <STATUS>Active</STATUS>\n            <FIRST_FOUND_DATETIME>2025-11-06T21:01:34Z</FIRST_FOUND_DATETIME>\n\
+            \            <LAST_FOUND_DATETIME>2026-01-28T11:55:26Z</LAST_FOUND_DATETIME>\n\
+            \            <QDS severity=\"CRITICAL\">95</QDS>\n            <QDS_FACTORS>\n\
+            \              <QDS_FACTOR name=\"exploit_maturity\">weaponized,poc</QDS_FACTOR>\n\
+            \              <QDS_FACTOR name=\"threat_actors\">Unattributed</QDS_FACTOR>\n\
+            \              <QDS_FACTOR name=\"CISA_vuln\">YES</QDS_FACTOR>\n     \
+            \         <QDS_FACTOR name=\"CVSS\">7.4</QDS_FACTOR>\n              <QDS_FACTOR\
+            \ name=\"CVSS_version\">v3.x</QDS_FACTOR>\n              <QDS_FACTOR name=\"\
+            epss\">0.00099</QDS_FACTOR>\n              <QDS_FACTOR name=\"trending\"\
+            >01152026,01272026,01172026,01072026,01142026,01132026,01232026,01162026,01102026,01242026,12302025,01202026,01122026,01042026,01052026,01022026,12312025,01192026,01092026,01262026,01212026,01012026,01182026</QDS_FACTOR>\n\
+            \              <QDS_FACTOR name=\"CVSS_vector\">CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H</QDS_FACTOR>\n\
+            \              <QDS_FACTOR name=\"CISA_DUE_DATE\">1758758400000</QDS_FACTOR>\n\
+            \              <QDS_FACTOR name=\"CISA_ADDED_DATE\">1756944000000</QDS_FACTOR>\n\
+            \            </QDS_FACTORS>\n            <TIMES_FOUND>516</TIMES_FOUND>\n\
+            \            <LAST_TEST_DATETIME>2026-01-28T11:55:26Z</LAST_TEST_DATETIME>\n\
+            \            <LAST_UPDATE_DATETIME>2026-01-28T11:55:27Z</LAST_UPDATE_DATETIME>\n\
+            \            <IS_IGNORED>0</IS_IGNORED>\n            <IS_DISABLED>0</IS_DISABLED>\n\
+            \            <LAST_PROCESSED_DATETIME>2026-01-28T11:55:27Z</LAST_PROCESSED_DATETIME>\n\
+            \          </DETECTION>\n          "
+          dt.openpipeline.pipelines:
+          - security.events:default
+          vulnerability.description: Ubuntu has released a security update for linux
+            to fix the vulnerabilities.<BR><BR><P>QID Detection Logic (Authenticated):<BR>QID
+            utilizes the target system's package manager, such as &quot;dpkg&quot;,
+            to enumerate packages and map them with vendor advisories to identify
+            vulnerable versions.<BR>
+          qualys.detection.last_found: '2026-01-28T11:55:26'
+          qualys.host.tracking_method: Cloud Agent
+          qualys.detection.first_found: '2025-11-06T21:01:34'
+          qualys.detection.qds_factors:
+            CVSS: '7.4'
+            epss: '0.00099'
+            CISAVuln: 'YES'
+            trending: 01152026,
+            CVSSVector: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H
+            CVSSVersion: v3.x
+            threatActors: Unattributed
+            CISA_DUE_DATE: '1758758400000'
+            CISA_ADDED_DATE: '1756944000000'
+            exploitMaturity: weaponized,poc
+          qualys.detection.times_found: '516'
+          vulnerability.exploit.status: AVAILABLE
+          vulnerability.references.cve:
+          - CVE-2025-38071
+          - CVE-2025-38130
+          vulnerability.remediation.status: AVAILABLE
+          vulnerability.remediation.description: 'Refer to Ubuntu security advisory
+            <A HREF="https://ubuntu.com/security/notices/USN-7769-3" TARGET="_blank">USN-7769-3</A>
+            for updates and patch information.
+
+            <P>Patch:<BR>
+
+            Following are links for downloading patches to fix the vulnerabilities:
+
+            <P> <A HREF="https://ubuntu.com/security/notices/USN-7769-3" TARGET="_blank">USN-7769-3:Ubuntu
+            Linux</A>'
+    search-already-existing-ticket:
+      name: search-already-existing-ticket
+      input:
+        jql: labels in ("{{result("filter-runtime-impact-only").records[0]["jira_label"]
+          }}") and statusCategory != Done
+        expand: []
+        fields: []
+        connectionId: ''
+      action: dynatrace.jira:jira-jql-search
+      position:
+        x: 0
+        y: 2
+      conditions:
+        custom: '{{result("filter-runtime-impact-only").records | length > 0}}'
+        states:
+          filter-runtime-impact-only: OK
+      description: Execute JQL queries to fetch issues from Jira
+      predecessors:
+      - filter-runtime-impact-only

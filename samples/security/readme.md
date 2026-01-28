@@ -26,6 +26,7 @@ For further information see the [security.events table migration guide](https://
 * `servicenow_create_ticket_per_host_static_assignment.yaml` - ServiceNow ticket creation for new critical vulnerabilities aggregated per host (static channel assignment).
 * `jira_create_ticket_per_host_with_ownership.yaml` - Jira ticket creation for new critical vulnerabilities aggregated per host (ownership-based channel assignment).
 * `ocsf_send_critical_vulnerabilities.yaml` - POST an HTTP request to a third-party tool for new critical vulnerabilities in the [Open Cyber Security Format (OCSF)](https://schema.ocsf.io/1.1.0/classes/vulnerability_finding?extensions=linux,win).
+* `create-jira-ticket-for-verified-host-vulnerabilities.yaml` - Jira ticket creation for critical and high severity vulnerabilities on hosts that were confirmed to be monitored by Dynatarce.
 
 ## Sample Workflows for Ingested Security Findings
 Note: Since the introduction of the Grail security table, up-to-date artifacts are now delivered directly in-product through new integrations.
