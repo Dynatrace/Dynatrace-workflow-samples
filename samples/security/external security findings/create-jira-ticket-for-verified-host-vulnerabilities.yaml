@@ -214,6 +214,7 @@ workflow:
         x: 0
         y: 2
       conditions:
+        custom: '{{result("filter-runtime-impact-only").records | length > 0}}'
         states:
           filter-runtime-impact-only: OK
       description: Execute JQL queries to fetch issues from Jira
