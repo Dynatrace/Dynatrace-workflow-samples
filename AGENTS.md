@@ -158,10 +158,18 @@ metadata:
 - `dynatrace.automations` - Core workflow actions (DQL queries, JavaScript, HTTP requests)
 - `dynatrace.jira` - Jira integration
 - `dynatrace.slack` - Slack integration
+- `dynatrace.msteams` - Microsoft Teams integration
 - `dynatrace.email` - Email actions
 - `dynatrace.ownership` - Team and ownership management
 - `dynatrace.aws.connector` - AWS integrations
+- `dynatrace.azure.connector` - Microsoft Entra ID (Azure) / Graph connector actions
+- `dynatrace.kubernetes.connector` - Kubernetes API automation (typically via EdgeConnect)
+- `dynatrace.redhat.ansible` - Red Hat Ansible Automation Platform / EDA integrations
 - `dynatrace.servicenow` - ServiceNow integration
+- `dynatrace.davis.workflow.actions` - Dynatrace Intelligence (Davis) workflow actions
+
+This list is not exhaustive. Dynatrace regularly ships additional Workflow connectors (for example GitHub, GitLab, Microsoft 365, PagerDuty, Jenkins, Snowflake, Azure, Red Hat Ansible, and Text Processing). For the current catalog, see:
+https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions
 
 #### 2. Tasks
 
@@ -320,13 +328,23 @@ input:
   bcc: []
   subject: "Alert: {{ event()['event.name'] }}"
   content: |-
-    Problem detected at {{ event()['dt.entity.host'] }}
+    # Problem detected
+
+    *Host*: {{ event()['dt.entity.host'] }}
 
     Details:
-    {{ result('get_logs').records | to_json }}
-  taskId: "{{ task().id }}"
-  executionId: "{{ execution().id }}"
-  environmentUrl: "{{ platform_url() }}"
+    {{ result('get_logs') | to_json }}
+
+# Notes
+# - You must specify at least one recipient in `to`, `cc`, or `bcc` (max 10 email addresses per field).
+# - If recipients are generated via expressions, they must evaluate to a list of email addresses, for example:
+#   {{ ["user1@domain.com", "user2@domain.com"] }}
+# - The Email Connector supports Markdown-like formatting in `content` (for example `*italics*`, `**bold**`, `~~strike~~`,
+#   headings with `#`, lists, tables, and `[label](https://example.com)` links).
+# - No HTML support; images and JavaScript in the body are not supported (they will appear as plain text).
+# - Keep message size well below 256 KiB: formatting is disabled at >= 256 KiB and larger payloads can cause the action to fail.
+# - Emails are sent from `no-reply@apps.dynatrace.com` (you may need to whitelist this domain).
+# - Workflows executing this action require the `email:emails:send` permission.
 ```
 
 #### Jira - Create Issue
@@ -358,19 +376,71 @@ input:
 ```yaml
 action: dynatrace.slack:slack-send-message
 input:
-  channel: "#alerts"
+  connection: ""  # Select a Slack connection
+  channel: ""      # Prefer Slack channel ID (recommended by docs)
   message: |-
-    :warning: Alert from Dynatrace
+    *Alert from Dynatrace*
 
     *Event*: {{ event()['event.name'] }}
     *Host*: {{ event()['dt.entity.host'] }}
-  connection: ""  # Connection ID
-  workflowID: "{{ execution().workflow.id }}"
-  executionID: "{{ execution().id }}"
-  executionDate: "{{ execution().started_at }}"
-  appendToThread: false
-  reaction: []
-  attachmentToggleValue: "none"
+
+# Notes
+# - Allow external requests to `slack.com` (Settings > General > External requests).
+# - Slack messages can be plain text/Slack Markdown, or a JSON Block Kit payload (see docs).
+```
+
+#### Microsoft Teams - Send Message
+```yaml
+action: dynatrace.msteams:send-message
+input:
+  connectionId: ""  # Select a Microsoft Teams webhook connection
+  message: |-
+    **Alert from Dynatrace**
+
+    **Event**: {{ event()['event.name'] }}
+    **Host**: {{ event()['dt.entity.host'] }}
+
+# Notes
+# - Allow external requests to the Power Automate webhook domain used by your connection.
+# - Microsoft Teams supports Markdown cards or AdaptiveCard JSON (recommended for rich layouts).
+# - Office 365 connectors are being retired; prefer Power Automate webhooks.
+```
+
+#### Microsoft Teams - AdaptiveCard Example
+```yaml
+action: dynatrace.msteams:send-message
+input:
+  connectionId: ""
+  message: |-
+    {
+      "type": "AdaptiveCard",
+      "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+      "version": "1.4",
+      "body": [
+        {
+          "type": "TextBlock",
+          "size": "Medium",
+          "weight": "Bolder",
+          "text": "Dynatrace report"
+        },
+        {
+          "type": "FactSet",
+          "facts": [
+            {
+              "title": "Event",
+              "value": {{ (event()['event.name'] | string) | to_json }}
+            },
+            {
+              "title": "Host",
+              "value": {{ (event()['dt.entity.host'] | string) | to_json }}
+            }
+          ]
+        }
+      ]
+    }
+
+# Notes
+# - Teams doesn't support Adaptive Cards Template Language; use Dynatrace expressions and `| to_json` for safe escaping.
 ```
 
 #### Get Ownership Information
@@ -852,21 +922,49 @@ With corresponding `workflow.json`:
 - `slack-send-message` - Send message to channel
 - `slack-send-message-user` - Send DM to user
 
+**Microsoft Teams** (`dynatrace.msteams:*`)
+- `send-message` - Send message (Markdown card or AdaptiveCard JSON)
+
 **Email** (`dynatrace.email:*`)
 - `send-email` - Send email
 
 **ServiceNow** (`dynatrace.servicenow:*`)
-- `servicenow-create-incident` - Create incident
-- `servicenow-update-incident` - Update incident
+- `snow-create-incident` - Create incident
+- `snow-search` / `snow-search-incidents` - Search records/incidents
+- `snow-comment-on-incident` - Add comment to incident
+- `snow-get-groups` - Fetch groups (used for team import/routing)
+
+Notes (docs):
+- Connector setup, required permissions, and the full list of available ServiceNow actions are documented here: https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions/service-now
+- ServiceNow workflow actions require granting Workflows the `app-settings:objects:read` permission (in addition to general Workflows permissions).
+- The ServiceNow connector also provides actions like resolve incident, create/update record, and general comment actions; use the Workflows action picker to select the action and copy the exact `action` ID (avoid guessing).
 
 **AWS** (`dynatrace.aws.connector:*`)
 - `s3-list-buckets`, `s3-put-object`, etc.
 - `lambda-invoke` - Invoke Lambda function
 - `ec2-*` - EC2 operations
 
+**Azure / Microsoft Entra ID** (`dynatrace.azure.connector:*`)
+- `get-groups` - List groups (Microsoft Entra ID)
+
+**Red Hat Ansible** (`dynatrace.redhat.ansible:*`)
+- `launch-job-template` - Launch an Automation Controller job template
+- `send-event-to-eda` - Send an event to Event-Driven Ansible
+
+**Dynatrace Intelligence (Davis)** (`dynatrace.davis.workflow.actions:*`)
+- `davis-analyze` - Run Davis analysis
+
+**Kubernetes** (`dynatrace.kubernetes.connector:*`)
+- `delete` - Delete resources (for example: `dynatrace.kubernetes.connector:delete`)
+
+Note: Kubernetes Connector actions resemble `kubectl` operations (apply, delete, get/list, logs, patch, rollout restart, wait). Exact action IDs can vary by connector version—prefer selecting from the Workflows action picker and keep `metadata.dependencies.apps` in sync.
+
 **Ownership** (`dynatrace.ownership:*`)
 - `get-ownership-from-entity` - Get entity owners
 - `import-teams-to-settings` - Import teams
+
+For additional connectors and their actions (GitHub, GitLab, Microsoft 365, PagerDuty, Jenkins, Snowflake, Azure, Red Hat Ansible, Text Processing, and more), refer to the official catalog:
+https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions
 
 ---
 
