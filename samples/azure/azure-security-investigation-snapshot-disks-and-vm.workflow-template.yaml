@@ -1,0 +1,227 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2632.2
+    - id: dynatrace.microsoft.azure.connector
+      version: ^1.0.2
+  inputs:
+  - type: connection
+    schema: builtin:hyperscaler-authentication.connections.azure
+    targets:
+    - tasks.snapshot_osdisk.connection
+    - tasks.snapshot_data_disks.connection
+    - tasks.create_data_disks_from_snapshot.connection
+    - tasks.create_disk_from_osdisk_snapshot.connection
+    - tasks.create_security_investigation_vm.connection
+workflow:
+  title: Azure Security Investigation - Snapshot, Disks, and VM
+  description: 'Creates snapshots of compromised VM disks (OS and data), provisions cloned disks from snapshots, and deploys a secure investigation VM with attached copies for analysis.'
+  schemaVersion: 3
+  trigger: {}
+  result: '{{ { "vm": result("create_security_investigation_vm"), "osDisk": result("create_disk_from_osdisk_snapshot"), "dataDisks": result("create_data_disks_from_snapshot") } | to_json }}'
+  type: STANDARD
+  input:
+    names:
+      vm: dt-security-investigation-vm
+    osdisk:
+      id: ''
+      name: ''
+    location: ''
+    dataDisks: []
+    subscriptionId: ''
+    resourceGroupName: ''
+    networkInterfaceId: ''
+  hourlyExecutionLimit: 1000
+  guide: null
+  tasks:
+    public_ssh_keys:
+      name: public_ssh_keys
+      input:
+        script: |
+          export default async function () {
+            return [
+              "<YOUR_SSH_KEY>"
+            ];
+          }
+      action: dynatrace.automations:run-javascript
+      position:
+        x: -1
+        y: 1
+      description: Provide SSH public keys to be injected into the VM
+      predecessors: []
+    snapshot_osdisk:
+      name: snapshot_osdisk
+      input:
+        snapshot:
+          location: '{{ input().location }}'
+          creationData:
+            sourceUri: '{{ input().osdisk.id }}'
+            createOption: Copy
+        connection: ''
+        snapshotName: '{{ input().osdisk.name }}-snapshot'
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-snapshots-begin-create-or-update
+      position:
+        x: 0
+        y: 1
+      description: Creates or updates a snapshot of the source OS disk
+      predecessors: []
+    snapshot_data_disks:
+      name: snapshot_data_disks
+      input:
+        snapshot:
+          location: '{{ input().location }}'
+          creationData:
+            sourceUri: '{{ _.dataDisk.managedDisk.id }}'
+            createOption: Copy
+        connection: ''
+        snapshotName: '{{ _.dataDisk.name }}-snapshot'
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-snapshots-begin-create-or-update
+      position:
+        x: 1
+        y: 1
+      withItems: dataDisk in {{ input().dataDisks }}
+      concurrency: 1
+      description: Creates or updates a snapshot for each data disk
+      predecessors: []
+    create_data_disks_from_snapshot:
+      name: create_data_disks_from_snapshot
+      input:
+        disk:
+          location: '{{ input().location }}'
+          creationData:
+            createOption: Copy
+            sourceResourceId: '{{ _.snapshot.id }}'
+        diskName: '{{ _.snapshot.name.split("-")[:-1][0] }}'
+        connection: ''
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-disks-begin-create-or-update
+      position:
+        x: 1
+        y: 2
+      conditions:
+        states:
+          snapshot_data_disks: OK
+      withItems: snapshot in {{ result("snapshot_data_disks") }}
+      concurrency: 1
+      description: Creates or updates a disk from data disk snapshots
+      predecessors:
+      - snapshot_data_disks
+    create_disk_from_osdisk_snapshot:
+      name: create_disk_from_osdisk_snapshot
+      input:
+        disk:
+          location: '{{ input().location }}'
+          creationData:
+            createOption: Copy
+            sourceResourceId: '{{ result("snapshot_osdisk").id }}'
+        diskName: '{{ input().osdisk.name }}'
+        connection: ''
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-disks-begin-create-or-update
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          snapshot_osdisk: OK
+      description: Creates or updates a disk from the OS disk snapshot
+      predecessors:
+      - snapshot_osdisk
+    create_security_investigation_vm:
+      name: create_security_investigation_vm
+      input:
+        vmName: '{{ input().names.vm }}'
+        connection: ''
+        parameters:
+          location: '{{ input().location }}'
+          osProfile:
+            computerName: dt-security-investigation
+            adminUsername: azureuser
+            linuxConfiguration: |
+              {
+                "disablePasswordAuthentication": true,
+                "ssh": {
+                  "publicKeys": [
+                    {% for key in result("public_ssh_keys") %}
+                    {
+                      "path": "/home/azureuser/.ssh/authorized_keys",
+                      "keyData": "{{ key }}"
+                    }
+                    {% if not loop.last %},{% endif %}
+                    {% endfor %}
+                  ]
+                }
+              }
+          networkProfile:
+            networkInterfaces: |
+              [
+                {
+                  "id": "{{ input().networkInterfaceId }}"
+                }
+              ]
+          storageProfile:
+            osDisk: |
+              {
+                "osType": "Linux",
+                "name": "dt-security-investigation-vm_OsDisk_1",
+                "createOption": "FromImage",
+                "caching": "ReadWrite",
+                "deleteOption": "Delete",
+                "diskSizeGB": 30
+              }
+            dataDisks: |
+              [
+                {
+                  "lun": 0,
+                  "name": "{{ result("create_disk_from_osdisk_snapshot").name }}",
+                  "createOption": "Attach",
+                  "managedDisk": {
+                    "id": "{{ result("create_disk_from_osdisk_snapshot").id }}"
+                  }
+                }
+                {% for dataDisk in result("create_data_disks_from_snapshot") %}
+                ,
+                {
+                  "lun": {{ loop.index }},
+                  "name": "{{ dataDisk.name }}",
+                  "createOption": "Attach",
+                  "managedDisk": {
+                    "id": "{{ dataDisk.id }}"
+                  }
+                }
+                {% endfor %}
+              ]
+            imageReference: |
+              {
+                "publisher": "canonical",
+                "offer": "ubuntu-24_04-lts",
+                "sku": "server",
+                "version": "latest",
+                "exactVersion": "24.04.202507010"
+              }
+          hardwareProfile:
+            vmSize: Standard_B1ls
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-virtual-machines-begin-create-or-update
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          public_ssh_keys: SUCCESS
+          create_data_disks_from_snapshot: OK
+          create_disk_from_osdisk_snapshot: SUCCESS
+      description: Create the security investigation VM and attach copied disks
+      predecessors:
+      - create_disk_from_osdisk_snapshot
+      - public_ssh_keys
+      - create_data_disks_from_snapshot

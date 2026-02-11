@@ -1,0 +1,154 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.microsoft.azure.connector
+      version: ^1.0.2
+  inputs:
+  - type: connection
+    schema: builtin:hyperscaler-authentication.connections.azure
+    targets:
+    - tasks.create_vnet.connection
+    - tasks.create_subnet.connection
+    - tasks.create_public_ip.connection
+    - tasks.create_network_interface.connection
+    - tasks.create_incident_resource_group.connection
+workflow:
+  title: Azure Security Investigation - Incident RG + Networking
+  description: 'Provisions secure investigation infrastructure including resource group, virtual network, subnet, public IP, and network interface for forensic analysis of compromised Azure VMs.'
+  schemaVersion: 3
+  trigger: {}
+  result: '{{ { "resourceGroupName": input().resourceGroupName, "publicIp": result("create_public_ip"),
+    "vnet": result("create_vnet"), "subnet": result("create_subnet"), "networkInterface":
+    result("create_network_interface") } | to_json }}'
+  type: STANDARD
+  input:
+    names:
+      nic: dt-security-investigation-net-interface
+      vnet: dt-security-investigation-vnet
+      subnet: dt-security-investigation-subnet
+      publicIp: dt-security-investigation-vm-ip
+    location: ''
+    subscriptionId: ''
+    addressPrefixes:
+      vnet:
+      - 10.0.0.0/16
+      subnet: 10.0.0.0/24
+    resourceGroupName: ''
+  hourlyExecutionLimit: 1000
+  guide: null
+  tasks:
+    create_vnet:
+      name: create_vnet
+      input:
+        connection: ''
+        parameters:
+          location: '{{ input().location }}'
+          addressSpace: |
+            {
+              "addressPrefixes": {{ input().addressPrefixes.vnet | to_json }}
+            }
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        virtualNetworkName: '{{ input().names.vnet }}'
+      action: dynatrace.microsoft.azure.connector:arm-network-virtual-networks-begin-create-or-update
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          create_public_ip: SUCCESS
+      description: Creates or updates a virtual network in the specified resource group
+      predecessors:
+      - create_public_ip
+    create_subnet:
+      name: create_subnet
+      input:
+        connection: ''
+        subnetName: '{{ input().names.subnet }}'
+        subscriptionId: '{{ input().subscriptionId }}'
+        subnetParameters:
+          addressPrefix: '{{ input().addressPrefixes.subnet }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        virtualNetworkName: '{{ result("create_vnet").name }}'
+      action: dynatrace.microsoft.azure.connector:arm-network-subnets-begin-create-or-update
+      position:
+        x: 0
+        y: 4
+      conditions:
+        states:
+          create_vnet: SUCCESS
+      description: Creates or updates a subnet in the specified virtual network
+      predecessors:
+      - create_vnet
+    create_public_ip:
+      name: create_public_ip
+      input:
+        connection: ''
+        parameters:
+          sku: |
+            {
+              "name": "Standard",
+              "tier": "Regional"
+            }
+          location: '{{ input().location }}'
+          publicIPAddressVersion: IPv4
+          publicIPAllocationMethod: Static
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        publicIpAddressName: '{{ input().names.publicIp }}'
+      action: dynatrace.microsoft.azure.connector:arm-network-public-i-p-addresses-begin-create-or-update
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          create_incident_resource_group: SUCCESS
+      description: Creates or updates a static or dynamic public IP address
+      predecessors:
+      - create_incident_resource_group
+    create_network_interface:
+      name: create_network_interface
+      input:
+        connection: ''
+        parameters:
+          location: '{{ input().location }}'
+          ipConfigurations: |
+            [
+              {
+                "name": "ipconfig1",
+                "publicIPAddress": {
+                  "id": "{{ result("create_public_ip").id }}"
+                },
+                "subnet": {
+                  "id": "{{ result("create_subnet").id }}"
+                }
+              }
+            ]
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        networkInterfaceName: '{{ input().names.nic }}'
+      action: dynatrace.microsoft.azure.connector:arm-network-network-interfaces-begin-create-or-update
+      position:
+        x: 0
+        y: 5
+      conditions:
+        states:
+          create_subnet: SUCCESS
+      description: Creates or updates a network interface
+      predecessors:
+      - create_subnet
+    create_incident_resource_group:
+      name: create_incident_resource_group
+      input:
+        connection: ''
+        parameters:
+          location: '{{ input().location }}'
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-resources-resource-groups-create-or-update
+      position:
+        x: 0
+        y: 1
+      description: Creates or updates a resource group
+      predecessors: []
