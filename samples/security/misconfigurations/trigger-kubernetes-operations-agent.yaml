@@ -100,5 +100,5 @@ workflow:
       position:
         x: 0
         y: 1
-      description: Make use of Dynatrace Grail data in your workflow.
+      description: This is a triggering workflow part of the Kubernetes misconfigurations fix use case. It is intended to work together with the Kubernetes Operations Agent as a subworkflow.
       predecessors: []
