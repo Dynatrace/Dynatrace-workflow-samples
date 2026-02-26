@@ -13,7 +13,7 @@ metadata:
     - tasks.get_vuln_vm_details.connection
 workflow:
   title: Azure Security Incident Workflow (parent)
-  description: 'Automated security incident response workflow that handles Azure VM compromises detected by Microsoft Sentinel. Retrieves VM details, isolates the compromised VM by applying network security groups, provisions a secure investigation environment with dedicated networking, and creates forensic snapshots with a cloned investigation VM for analysis.'
+  description: 'Automated security incident response workflow that handles Azure VM compromises detected by Azure Sentinel. Retrieves VM details, isolates the compromised VM by applying network security groups, provisions a secure investigation environment with dedicated networking, and creates forensic snapshots with a cloned investigation VM for analysis.'
   schemaVersion: 3
   trigger:
     eventTrigger:

@@ -20,7 +20,7 @@ metadata:
     - tasks.create_network_security_group_for_isolation.connection
 workflow:
   title: Azure Security Investigation - Isolate Vulnerable VM
-  description: 'Isolates compromised Azure VM by creating resource locks, disabling managed identities, applying isolation NSG to network interfaces, and hardening associated storage accounts to prevent further damage.'
+  description: 'Isolates compromised Azure VM by creating resource locks, disabling managed identities, applying an isolation NSG that denies all outbound traffic and allows only limited inbound access from a configurable allowlist to network interfaces, and hardening associated storage accounts to prevent further damage.'
   schemaVersion: 3
   trigger: {}
   result: '{{ { "nsg": result("create_network_security_group_for_isolation"), "updatedNics": result("associate_nsg_with_interfaces"), "locks": { "delete": result("create_do_not_delete_lock"), "modify": result("create_do_not_modify_lock") } } | to_json }}'
