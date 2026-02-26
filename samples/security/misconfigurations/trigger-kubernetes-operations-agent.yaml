@@ -37,7 +37,7 @@ workflow:
     suggest_k8s_fixes:
       name: suggest_k8s_fixes
       input:
-        workflowId: 4f19bca2-7a94-4876-861a-9be0fdd95268
+        workflowId: 
         workflowInput: "{\n  \"k8s.object\": {{ _.item[\"k8s.object\"] }},\n  \"occurences\"\
           :  {{ _.item[\"total\"] }},\n  \"object.type\": \"{{ _.item[\"object.type\"\
           ] }}\",\n  \"finding.title\": \"{{ _.item[\"finding.title\"] }}\",\n  \"\
