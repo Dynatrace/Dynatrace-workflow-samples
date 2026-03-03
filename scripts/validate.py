@@ -340,6 +340,9 @@ def validate_json_syntax(path: Path) -> Any | None:
     except UnicodeDecodeError as exc:
         error(path, f"Encoding error: {exc}")
         return None
+    except OSError as exc:
+        error(path, f"I/O error while reading JSON file: {exc}")
+        return None
 
 
 # ---------------------------------------------------------------------------
