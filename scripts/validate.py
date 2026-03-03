@@ -583,7 +583,8 @@ def scan_secrets(path: Path) -> None:
                 continue
             if "secret(" in context.lower():
                 continue
-            warn(path, f"{desc}: ...{matched[:40]}...")
+            line_no = text.count("\n", 0, m.start()) + 1
+            warn(path, f"{desc} at line {line_no} (secret value redacted)")
 
 
 # ---------------------------------------------------------------------------
