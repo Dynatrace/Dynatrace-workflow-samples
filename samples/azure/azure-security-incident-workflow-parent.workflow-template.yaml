@@ -1,0 +1,250 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2632.2
+    - id: dynatrace.microsoft.azure.connector
+      version: ^1.0.2
+  inputs:
+  - type: connection
+    schema: builtin:hyperscaler-authentication.connections.azure
+    targets:
+    - tasks.get_vuln_vm_details.connection
+workflow:
+  title: Azure Security Incident Workflow (parent)
+  description: 'Automated security incident response workflow that handles Azure VM compromises detected by Azure Sentinel. Retrieves VM details, isolates the compromised VM by applying network security groups, provisions a secure investigation environment with dedicated networking, and creates forensic snapshots with a cloned investigation VM for analysis.'
+  schemaVersion: 3
+  trigger:
+    eventTrigger:
+      isActive: true
+      filterQuery: event.provider=="Microsoft Sentinel" and event[`azure.resource.type`]=="Microsoft.Compute/virtualMachines"
+      uniqueExpression: null
+      triggerConfiguration:
+        type: event
+        value:
+          query: event.provider=="Microsoft Sentinel" and event[`azure.resource.type`]=="Microsoft.Compute/virtualMachines"
+          eventType: security.events
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: |
+    ### Security use case workflow
+
+    This is implementation of automated Azure security response actions for handling security incidents detected through
+    Azure Sentinel.
+    When an external intrusion or suspicious activity is detected on a VM, the workflow performs the following automated
+    steps:
+
+    - Retrieves details of the affected VM.
+    - Blocks all inbound and outbound network traffic by creating and attaching an isolation Network Security Group (NSG).
+    - Provisions a secure investigation environment with dedicated networking components.
+    - Creates snapshots of the VM's disks and deploys a cloned investigation VM from those snapshots.
+    - This ensures that the compromised VM is immediately isolated from the network, while its state and data are preserved
+      for forensic analysis without risk of tampering.
+
+    These actions follow established Azure response procedures and enable security teams to rapidly respond to compromised
+    VMs by preserving forensic evidence, isolating affected resources, and providing secure investigation environments.
+    Follow next steps:
+
+    1. Navigate to Azure Portal and search for virtual machines.
+        - Select your subscription and create a resource group (for instance `demo-incident-workflow`).
+        - Give a name (for instance `vulnerable-vm`).
+        - Select any region (for instance East US).
+        - Select any virtual machine size.
+        - Configure the Virtual Machine to your liking. For example:
+            - Authentication type: Password.
+            - Set a username and password for VM access.
+            - Change Public inbound ports to None.
+        - Hit `Create a VM`.
+    2. Navigate to recently created VM and copy Subscription ID.
+    3. Upload one workflow YAML template and three sub-workflow YAML templates to the Workflows app; they will be triggered
+       sequentially in response to an Azure Sentinel alert.
+        - `azure-security-incident-workflow-parent.workflow-template.yaml`
+        - `azure-security-investigation-incident-rg-networking.workflow-template.yaml`
+        - `azure-security-investigation-isolate-vulnerable-vm.workflow-template.yaml`
+        - `azure-security-investigation-snapshot-disks-and-vm.workflow-template.yaml`
+
+       3.1. Define the right connection or create a new one following the
+       setup [guide](https://docs.dynatrace.com/docs/shortlink/automation-workflows-azure-setup).
+    4. Verify that all sub-workflows are properly linked in the parent workflow. For instance, `isolate_vulnerable_vm`
+       workflow should be linked to the `Azure Security Investigation - Isolate Vulnerable VM` subworkflow.
+
+       4.1 Ensure you have an SSH key pair available. If you do not have one, generate it using your system's standard
+          method (e.g., ssh-keygen on macOS/Linux or PuTTYgen on Windows). Paste the public key into the public_ssh_keys widget
+          of the Azure Security Investigation - Snapshot, Disks, and VM workflow, and update the JavaScript code snippet
+          accordingly.
+    5. Press `Run` and provide the JSON below as the example event to trigger the workflow:
+
+       ```json
+       {
+         "azure.subscription": "<YOUR_SUBSCRIPTION_ID>",
+         "azure.resource.group": "<YOUR_RESOURCE_GROUP>",
+         "azure.resource.name": "<YOUR_VM_NAME>"
+       }
+       ```
+
+    **Note**: After the workflow is executed, an Azure resource lock is automatically created for the affected virtual
+    machine.
+    The lock prevents deletion or modification of the VM during the security investigation, ensuring that forensic evidence
+    remains intact.
+    `SEC-INVEST-DONOTDELETE` – prevents accidental deletion.
+    `SEC-INVEST-DONOTMODIFY` – prevents changes to the resource.
+    These locks should be removed only after the investigation is complete and the resources are no longer required.
+
+    ___
+    After successful execution, you should see a new resource group created in Azure with the given name.
+    In our example, a new `incident-workflow` resource group was created to serve as a dedicated space for all resources
+    generated during the process:
+
+    - A virtual machine for conducting the investigation.
+    - A snapshot of the source VM's disks.
+    - A network security group with rules blocking all inbound and outbound traffic.
+    - A disk cloned from the source VM, which can be used for forensic analysis.
+
+    How to clean up after running the workflow:
+
+    1. At the Azure Portal, navigate to the previously created resource group at the step 1, find `Settings` → `Locks` and
+       delete both
+       `SEC-INVEST-DONOTDELETE` and `SEC-INVEST-DONOTMODIFY`.
+    2. Delete the virtual machine.
+    3. Delete the resource group `incident-workflow`.
+  tasks:
+    get_vuln_vm_details:
+      name: get_vuln_vm_details
+      input:
+        vmName: vulnerable-vm
+        connection: ''
+        subscriptionId: '{{ event()["azure.subscription"] }}'
+        resourceGroupName: '{{ event()["azure.resource.group"] }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-virtual-machines-get
+      active: true
+      position:
+        x: 0
+        y: 1
+      conditions:
+        states: {}
+      description: Retrieves information about the model view or instance view of
+        a virtual machine
+      predecessors: []
+    ip_address_allow_list:
+      name: ip_address_allow_list
+      input:
+        script: |
+          export default async function () {
+            // Allowed source IPs for SSH/RDP during investigation
+            return [
+              "127.143.108.82",
+              "127.143.108.83",
+              "127.143.108.84"
+            ];
+          }
+      action: dynatrace.automations:run-javascript
+      active: true
+      position:
+        x: 1
+        y: 1
+      conditions:
+        states: {}
+      description: Returns a list of allowed source IP addresses for SSH/RDP access to the VM during the investigation
+      predecessors: []
+    isolate_vulnerable_vm:
+      name: isolate_vulnerable_vm
+      input:
+        workflowId: null
+        workflowInput: |
+          {
+            "vm": {
+              "id": "{{ result("get_vuln_vm_details").id }}",
+              "name": "{{ result("get_vuln_vm_details").name }}"
+            },
+            "identity": {
+              "type": "None" 
+            },
+            "location": "{{ result("get_vuln_vm_details").location }}",
+            "ipAllowList": {{ result("ip_address_allow_list") | to_json  }},
+            "subscriptionId": "{{ event()["azure.subscription"] }}",
+            "networkInterfaces": {{ result("get_vuln_vm_details").networkProfile.networkInterfaces | to_json }},
+            "resourceGroupName": "{{ event()["azure.resource.group"] }}",
+            "disableManagedIdentities": false
+          }
+      action: dynatrace.automations:run-workflow
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          get_vuln_vm_details: SUCCESS
+          ip_address_allow_list: SUCCESS
+      description: Lock VM, create isolation NSG and associate to NICs, harden storage
+        accounts
+      predecessors:
+      - get_vuln_vm_details
+      - ip_address_allow_list
+    provision_incident_env:
+      name: provision_incident_env
+      input:
+        workflowId: null
+        workflowInput: |
+          {
+            "names": {
+              "nic": "dt-security-investigation-net-interface",
+              "vnet": "dt-security-investigation-vnet",
+              "subnet": "dt-security-investigation-subnet",
+              "publicIp": "dt-security-investigation-vm-ip"
+            },
+            "location": "{{ result("get_vuln_vm_details").location }}",
+            "subscriptionId": "{{ event()["azure.subscription"] }}",
+            "addressPrefixes": {
+              "vnet": [
+                "10.0.0.0/16"
+              ],
+              "subnet": "10.0.0.0/24"
+            },
+            "resourceGroupName": "incident-workflow"
+          }
+      action: dynatrace.automations:run-workflow
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          isolate_vulnerable_vm: SUCCESS
+      description: Create/ensure incident RG and networking (Public IP, VNet, Subnet,
+        NIC)
+      predecessors:
+      - isolate_vulnerable_vm
+    snapshot_and_provision_vm:
+      name: snapshot_and_provision_vm
+      input:
+        workflowId: null
+        workflowInput: |
+          {
+            "names": {
+              "vm": "dt-security-investigation-vm"
+            },
+            "osdisk": {
+              "id": "{{ result("get_vuln_vm_details").storageProfile.osDisk.managedDisk.id }}",
+              "name": "{{ result("get_vuln_vm_details").storageProfile.osDisk.name }}"
+            },
+            "location": "{{ result("get_vuln_vm_details").location }}",
+            "dataDisks": {{ result("get_vuln_vm_details").storageProfile.dataDisks | to_json }},
+            "subscriptionId": "{{ event()["azure.subscription"] }}",
+            "resourceGroupName": "incident-workflow",
+            "networkInterfaces": {{ result("get_vuln_vm_details").networkProfile.networkInterfaces | to_json }},
+            "networkInterfaceId": "{{ result("provision_incident_env").networkInterface.id }}"
+          }
+      action: dynatrace.automations:run-workflow
+      position:
+        x: 0
+        y: 4
+      conditions:
+        states:
+          get_vuln_vm_details: SUCCESS
+          provision_incident_env: SUCCESS
+      description: Snapshot disks, create copies, and provision the investigation
+        VM
+      predecessors:
+      - get_vuln_vm_details
+      - provision_incident_env

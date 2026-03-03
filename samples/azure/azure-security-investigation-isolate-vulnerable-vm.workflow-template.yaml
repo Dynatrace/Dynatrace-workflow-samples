@@ -1,0 +1,287 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2632.2
+    - id: dynatrace.microsoft.azure.connector
+      version: ^1.0.2
+  inputs:
+  - type: connection
+    schema: builtin:hyperscaler-authentication.connections.azure
+    targets:
+    - tasks.create_do_not_delete_lock.connection
+    - tasks.create_do_not_modify_lock.connection
+    - tasks.identify_role_assignments.connection
+    - tasks.disable_managed_identities.connection
+    - tasks.get_network_interface_of_vm.connection
+    - tasks.associate_nsg_with_interfaces.connection
+    - tasks.disallow_anonymous_blob_access.connection
+    - tasks.create_network_security_group_for_isolation.connection
+workflow:
+  title: Azure Security Investigation - Isolate Vulnerable VM
+  description: 'Isolates compromised Azure VM by creating resource locks, disabling managed identities, applying an isolation NSG that denies all outbound traffic and allows only limited inbound access from a configurable allowlist to network interfaces, and hardening associated storage accounts to prevent further damage.'
+  schemaVersion: 3
+  trigger: {}
+  result: '{{ { "nsg": result("create_network_security_group_for_isolation"), "updatedNics": result("associate_nsg_with_interfaces"), "locks": { "delete": result("create_do_not_delete_lock"), "modify": result("create_do_not_modify_lock") } } | to_json }}'
+  type: STANDARD
+  input:
+    vm:
+      id: ''
+      name: ''
+    identity:
+      type: ''
+      userAssignedIdentities: {}
+    location: ''
+    ipAllowList: []
+    subscriptionId: ''
+    networkInterfaces: []
+    resourceGroupName: ''
+  hourlyExecutionLimit: 1000
+  guide: null
+  tasks:
+    create_do_not_delete_lock:
+      name: create_do_not_delete_lock
+      input:
+        scope: '{{ input().vm.id }}'
+        lockName: SEC-INVEST-DONOTDELETE
+        connection: ''
+        parameters:
+          level: CanNotDelete
+          notes: Ongoing security investigation, do not delete!
+        subscriptionId: '{{ input().subscriptionId }}'
+      action: dynatrace.microsoft.azure.connector:arm-locks-management-locks-create-or-update-by-scope
+      position:
+        x: -1
+        y: 1
+      description: Create or update a management lock by scope
+      predecessors: []
+    create_do_not_modify_lock:
+      name: create_do_not_modify_lock
+      input:
+        scope: '{{ input().vm.id }}'
+        lockName: SEC-INVEST-DONOTMODIFY
+        connection: ''
+        parameters:
+          level: ReadOnly
+          notes: Ongoing security investigation, do not modify!
+        subscriptionId: '{{ input().subscriptionId }}'
+      action: dynatrace.microsoft.azure.connector:arm-locks-management-locks-create-or-update-by-scope
+      position:
+        x: -1
+        y: 3
+      conditions:
+        states:
+          disable_managed_identities: SUCCESS
+      description: Create or update a management lock by scope
+      predecessors:
+      - disable_managed_identities
+    identify_role_assignments:
+      name: identify_role_assignments
+      input:
+        scope: /subscriptions/{{ input().subscriptionId }}
+        options:
+          filter: assignedTo('{{ _.item.principalId }}')
+        connection: ''
+        subscriptionId: '{{ input().subscriptionId }}'
+      action: dynatrace.microsoft.azure.connector:arm-authorization-role-assignments-list-for-scope
+      position:
+        x: 2
+        y: 1
+      conditions:
+        else: STOP
+        custom: '{{ input().identity is defined and "UserAssigned" in input().identity.type }}'
+        states: {}
+      withItems: item in {{ input().identity.userAssignedIdentities.items() | map(attribute=1) | list }}
+      concurrency: 1
+      description: List role assignments for user-assigned identities
+      predecessors: []
+    disable_managed_identities:
+      name: disable_managed_identities
+      input:
+        vmName: '{{ input().vm.name }}'
+        connection: ''
+        parameters:
+          identity: |
+            {
+              "type": "None"
+            }
+          location: '{{ input().location }}'
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+      action: dynatrace.microsoft.azure.connector:arm-compute-virtual-machines-begin-create-or-update
+      active: true
+      position:
+        x: -1
+        y: 2
+      conditions:
+        custom: ''
+        states:
+          create_do_not_delete_lock: SUCCESS
+      description: Optionally remove managed identities from the VM
+      predecessors:
+      - create_do_not_delete_lock
+    get_network_interface_of_vm:
+      name: get_network_interface_of_vm
+      input:
+        connection: ''
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        networkInterfaceName: '{{ _.networkInterface.id.split("/")[-1] }}'
+      action: dynatrace.microsoft.azure.connector:arm-network-network-interfaces-get
+      position:
+        x: 0
+        y: 1
+      conditions:
+        states: {}
+      withItems: networkInterface in {{ input().networkInterfaces }}
+      concurrency: 1
+      description: Get NIC definitions to preserve ipConfigurations when associating NSG
+      predecessors: []
+    associate_nsg_with_interfaces:
+      name: associate_nsg_with_interfaces
+      input:
+        connection: ''
+        parameters:
+          location: '{{ input().location }}'
+          ipConfigurations: '{{ _.networkInterface.ipConfigurations | to_json }}'
+          networkSecurityGroup: |
+            {
+              "id": {{ result("create_network_security_group_for_isolation").id | to_json }}
+            }
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        networkInterfaceName: '{{ _.networkInterface.id.split("/")[-1] }}'
+      action: dynatrace.microsoft.azure.connector:arm-network-network-interfaces-begin-create-or-update
+      position:
+        x: 1
+        y: 2
+      conditions:
+        states:
+          get_network_interface_of_vm: SUCCESS
+          create_network_security_group_for_isolation: SUCCESS
+      withItems: networkInterface in {{ result("get_network_interface_of_vm") }}
+      concurrency: 1
+      description: Associate isolation NSG with all NICs of the vulnerable VM
+      predecessors:
+      - get_network_interface_of_vm
+      - create_network_security_group_for_isolation
+    disallow_anonymous_blob_access:
+      name: disallow_anonymous_blob_access
+      input:
+        connection: ''
+        parameters: |
+          {
+            "allowBlobPublicAccess": false
+          }
+        accountName: '{{ _.item.scope.split("/")[-1] }}'
+        subscriptionId: '{{ _.item.scope.split("/")[2] }}'
+        resourceGroupName: '{{ _.item.scope.split("/")[4] }}'
+      action: dynatrace.microsoft.azure.connector:arm-storage-storage-accounts-update
+      position:
+        x: 2
+        y: 3
+      conditions:
+        states:
+          filter_storage_account_assignments: SUCCESS
+      withItems: item in {{ result("filter_storage_account_assignments") }}
+      concurrency: 1
+      description: Disable anonymous blob access on affected storage accounts
+      predecessors:
+      - filter_storage_account_assignments
+    filter_storage_account_assignments:
+      name: filter_storage_account_assignments
+      input:
+        script: |
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function () {
+            const ex = await execution();
+          
+            const assignmentLists = await ex.result('identify_role_assignments');
+            const result = [];
+
+            // Flatten the list and filter for storage accounts
+            for (const assignmentList of assignmentLists) {
+              for (const assignment of assignmentList) {
+                if (assignment.scope.includes('Microsoft.Storage/storageAccounts')) {
+                  result.push(assignment);
+                }
+              }
+            }
+
+            return result;
+          }
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 2
+        y: 2
+      conditions:
+        states:
+          identify_role_assignments: SUCCESS
+      description: Keep only role assignments on Storage Accounts
+      predecessors:
+      - identify_role_assignments
+    create_network_security_group_for_isolation:
+      name: create_network_security_group_for_isolation
+      input:
+        connection: ''
+        parameters:
+          location: '{{ input().location }}'
+          securityRules: |
+            [
+              {
+                "name": "AllowDynatraceSSHInbound",
+                "protocol": "Tcp",
+                "sourcePortRange": "*",
+                "destinationPortRange": "22",
+                "destinationAddressPrefix": "*",
+                "access": "Allow",
+                "priority": 300,
+                "direction": "Inbound",
+                "sourcePortRanges": [],
+                "destinationPortRanges": [],
+                "sourceAddressPrefixes": {{ input().ipAllowList | to_json }},
+                "destinationAddressPrefixes": []
+              },
+              {
+                "name": "AllowDynatraceRDPInbound",
+                "protocol": "Tcp",
+                "sourcePortRange": "*",
+                "destinationPortRange": "3389",
+                "destinationAddressPrefix": "*",
+                "access": "Allow",
+                "priority": 370,
+                "direction": "Inbound",
+                "sourcePortRanges": [],
+                "destinationPortRanges": [],
+                "sourceAddressPrefixes": {{ input().ipAllowList | to_json }},
+                "destinationAddressPrefixes": []
+              },
+              {
+                "name": "DenyTagCustomAnyOutbound",
+                "protocol": "*",
+                "sourcePortRange": "*",
+                "sourceAddressPrefix": "*",
+                "destinationPortRange": "*",
+                "destinationAddressPrefix": "*",
+                "access": "Deny",
+                "priority": 100,
+                "direction": "Outbound",
+                "sourcePortRanges": [],
+                "destinationPortRanges": [],
+                "sourceAddressPrefixes": [],
+                "destinationAddressPrefixes": []
+              }
+            ]
+        subscriptionId: '{{ input().subscriptionId }}'
+        resourceGroupName: '{{ input().resourceGroupName }}'
+        networkSecurityGroupName: '{{ input().vm.name }}-nsg-isolated'
+      action: dynatrace.microsoft.azure.connector:arm-network-network-security-groups-begin-create-or-update
+      position:
+        x: 1
+        y: 1
+      conditions:
+        states: {}
+      description: Creates or updates a network security group for isolation
+      predecessors: []
