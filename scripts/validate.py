@@ -739,6 +739,7 @@ def main() -> int:
 
         # ── YAML files ──
         if suffix in yaml_extensions:
+            scan_secrets(f)
             data = validate_yaml_syntax(f)
             if data is None:
                 continue
@@ -746,18 +747,15 @@ def main() -> int:
             if not is_non_workflow(f) and is_workflow_template_yaml(data):
                 validate_workflow_template(f, data, catalog)
 
-            scan_secrets(f)
-
         # ── JSON files ──
         elif suffix in json_extensions:
+            scan_secrets(f)
             data = validate_json_syntax(f)
             if data is None:
                 continue
 
             if not is_non_workflow(f) and is_workflow_json(data):
                 validate_workflow_json(f, data, catalog)
-
-            scan_secrets(f)
 
         # ── Markdown files ──
         elif suffix in md_extensions:
