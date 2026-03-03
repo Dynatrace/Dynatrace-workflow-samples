@@ -302,6 +302,12 @@ def is_workflow_json(data: Any) -> bool:
     return has_tasks and (has_schema or "title" in data)
 
 
+# Regex for the action format: <app_id>:<action_name>
+# app_id: alphanumeric characters, dots, hyphens, underscores
+# action_name: alphanumeric characters, hyphens, underscores
+_ACTION_FORMAT_RE = re.compile(r"^[A-Za-z0-9._-]+:[A-Za-z0-9_-]+$")
+
+
 # ---------------------------------------------------------------------------
 # 1. YAML Syntax Validation
 # ---------------------------------------------------------------------------
@@ -309,8 +315,12 @@ def is_workflow_json(data: Any) -> bool:
 def validate_yaml_syntax(path: Path) -> Any | None:
     """Parse a YAML file. Returns parsed data or None on failure."""
     if not HAS_YAML:
-        # Fall back: just check it loads without exception using a basic parse
-        warn(path, "PyYAML not installed — skipping YAML validation")
+        # PyYAML is required for YAML validation; treat its absence as an error
+        error(
+            path,
+            "Cannot validate YAML syntax because PyYAML is not installed. "
+            "Install it with 'pip install pyyaml'.",
+        )
         return None
     try:
         with open(path, encoding="utf-8") as f:
@@ -392,9 +402,8 @@ def validate_workflow_template(path: Path, data: dict[str, Any], catalog: dict[s
         # ── Action format ──
         action = task.get("action")
         if action and not _is_jinja(str(action)):
-            # Actions follow the pattern: <app_id>:<action_name>
-            # e.g. dynatrace.automations:execute-dql-query
-            if not re.match(r"^[\w][\w.-]*:[\w][\w.-]*$", str(action)):
+            # Actions must follow the strict pattern: <app_id>:<action_name>
+            if not _ACTION_FORMAT_RE.match(str(action)):
                 error(path, f"Task '{key}': action '{action}' does not match expected format 'app.id:action-name'")
             elif catalog:
                 validate_action_against_catalog(path, key, str(action), catalog)
@@ -518,7 +527,7 @@ def validate_workflow_json(path: Path, data: dict[str, Any], catalog: dict[str, 
         # ── action format ──
         action = task.get("action")
         if action and not _is_jinja(str(action)):
-            if not re.match(r"^[\w][\w.-]*:[\w][\w.-]*$", str(action)):
+            if not _ACTION_FORMAT_RE.match(str(action)):
                 error(path, f"Task '{key}': action '{action}' does not match expected format 'app.id:action-name'")
             elif catalog:
                 validate_action_against_catalog(path, key, str(action), catalog)
@@ -549,11 +558,11 @@ _SECRET_PATTERNS: list[tuple[re.Pattern[str], str, re.Pattern[str] | None]] = [
         "Possible Dynatrace API token",
         re.compile(r"dt0s02\.SAMPLE|dt0[a-z]\d{2}\.<|dt0[a-z]\d{2}\.PLACEHOLDER", re.I),
     ),
-    # AWS access key IDs
+    # AWS access key IDs — exclude well-known non-secret example values
     (
         re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
         "Possible AWS Access Key ID",
-        None,
+        re.compile(r"\bAKIA[0-9A-Z]*(EXAMPLE|TEST|DUMMY)\b", re.I),
     ),
     # Generic private keys
     (
@@ -618,19 +627,30 @@ def validate_markdown_links(path: Path) -> None:
     except OSError:
         return
 
-    # Match [text](relative/path) — skip URLs, anchors, and mailto
+    # Match [text](destination) — handles optional titles and angle-bracket destinations
     for m in re.finditer(r"\[([^\]]*)\]\(([^)]+)\)", text):
-        target = m.group(2).strip()
+        raw_target = m.group(2).strip()
+        # Parse destination and optional title; handle angle-bracket-wrapped destinations.
+        # Markdown allows: [text](dest), [text](<dest>), [text](dest "title"), etc.
+        dest_match = re.match(
+            r'^(?:<(?P<bracketed>[^>]+)>|(?P<bare>\S+))'
+            r'(?:\s+(?:"[^"]*"|\'[^\']*\'))?\s*$',
+            raw_target,
+        )
+        if not dest_match:
+            # Cannot confidently parse destination — skip to avoid false positives
+            continue
+        destination = dest_match.group("bracketed") or dest_match.group("bare")
         # Skip external URLs, anchors, mailto, template vars
-        if re.match(r"(https?://|mailto:|#|\{\{)", target, re.I):
+        if re.match(r"(https?://|mailto:|#|\{\{)", destination, re.I):
             continue
         # Strip anchor from relative path
-        target_path = target.split("#")[0]
+        target_path = destination.split("#")[0]
         if not target_path:
             continue
         resolved = (path.parent / target_path).resolve()
         if not resolved.exists():
-            warn(path, f"Broken relative link: [{m.group(1)}]({target})")
+            warn(path, f"Broken relative link: [{m.group(1)}]({raw_target})")
 
 
 # ---------------------------------------------------------------------------
@@ -639,12 +659,21 @@ def validate_markdown_links(path: Path) -> None:
 
 def collect_files(roots: list[Path]) -> list[Path]:
     """Collect all relevant files under the given roots."""
+    _PRUNE_DIRS = {
+        ".git", ".hg", ".svn",
+        ".venv", "venv", ".env",
+        "node_modules", "vendor",
+        "__pycache__", ".tox", ".mypy_cache",
+    }
     files: list[Path] = []
     for root in roots:
         if root.is_file():
             files.append(root)
         elif root.is_dir():
-            for dirpath, _dirnames, filenames in os.walk(root):
+            for dirpath, dirnames, filenames in os.walk(root):
+                # Prune heavy/non-source directories to avoid VCS metadata,
+                # virtualenvs, and vendored dependencies.
+                dirnames[:] = [d for d in dirnames if d not in _PRUNE_DIRS]
                 for fn in filenames:
                     files.append(Path(dirpath) / fn)
     return sorted(set(files))
@@ -738,25 +767,17 @@ def main() -> int:
 
         # ── YAML files ──
         if suffix in yaml_extensions:
-            scan_secrets(f)
             data = validate_yaml_syntax(f)
-            scan_secrets(f)
-            if data is None:
-                continue
-
-            if not is_non_workflow(f) and is_workflow_template_yaml(data):
+            if data is not None and not is_non_workflow(f) and is_workflow_template_yaml(data):
                 validate_workflow_template(f, data, catalog)
+            scan_secrets(f)
 
         # ── JSON files ──
         elif suffix in json_extensions:
-            scan_secrets(f)
             data = validate_json_syntax(f)
-            scan_secrets(f)
-            if data is None:
-                continue
-
-            if not is_non_workflow(f) and is_workflow_json(data):
+            if data is not None and not is_non_workflow(f) and is_workflow_json(data):
                 validate_workflow_json(f, data, catalog)
+            scan_secrets(f)
 
         # ── Markdown files ──
         elif suffix in md_extensions:
