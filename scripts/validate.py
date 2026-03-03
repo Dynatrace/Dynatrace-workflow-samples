@@ -319,6 +319,9 @@ def validate_yaml_syntax(path: Path) -> Any | None:
     except yaml.YAMLError as exc:
         error(path, f"Invalid YAML syntax: {exc}")
         return None
+    except OSError as exc:
+        error(path, f"Cannot read YAML file: {exc}")
+        return None
 
 
 # ---------------------------------------------------------------------------
