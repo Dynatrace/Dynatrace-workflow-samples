@@ -738,6 +738,7 @@ def main() -> int:
 
         # ── YAML files ──
         if suffix in yaml_extensions:
+            scan_secrets(f)
             data = validate_yaml_syntax(f)
             scan_secrets(f)
             if data is None:
@@ -748,6 +749,7 @@ def main() -> int:
 
         # ── JSON files ──
         elif suffix in json_extensions:
+            scan_secrets(f)
             data = validate_json_syntax(f)
             scan_secrets(f)
             if data is None:
