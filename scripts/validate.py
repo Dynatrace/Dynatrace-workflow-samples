@@ -393,8 +393,9 @@ def validate_workflow_template(path: Path, data: dict[str, Any], catalog: dict[s
         action = task.get("action")
         if action and not _is_jinja(str(action)):
             # Actions follow the pattern: <app_id>:<action_name>
-            if ":" not in str(action):
-                error(path, f"Task '{key}': action '{action}' is missing ':' separator (expected format 'app.id:action-name')")
+            # e.g. dynatrace.automations:execute-dql-query
+            if not re.match(r"^[\w][\w.-]*:[\w][\w.-]*$", str(action)):
+                error(path, f"Task '{key}': action '{action}' does not match expected format 'app.id:action-name'")
             elif catalog:
                 validate_action_against_catalog(path, key, str(action), catalog)
 
@@ -516,10 +517,11 @@ def validate_workflow_json(path: Path, data: dict[str, Any], catalog: dict[str, 
 
         # ── action format ──
         action = task.get("action")
-        if action and ":" not in str(action) and not _is_jinja(str(action)):
-            error(path, f"Task '{key}': action '{action}' missing ':' separator")
-        elif action and catalog and ":" in str(action) and not _is_jinja(str(action)):
-            validate_action_against_catalog(path, key, str(action), catalog)
+        if action and not _is_jinja(str(action)):
+            if not re.match(r"^[\w][\w.-]*:[\w][\w.-]*$", str(action)):
+                error(path, f"Task '{key}': action '{action}' does not match expected format 'app.id:action-name'")
+            elif catalog:
+                validate_action_against_catalog(path, key, str(action), catalog)
 
         # ── predecessors ──
         preds = task.get("predecessors", [])
@@ -727,37 +729,32 @@ def main() -> int:
         # Track sample directories
         try:
             frel = f.resolve().relative_to(REPO_ROOT / "samples")
-            # Collect the immediate subdirectory under samples/
+            # Collect all ancestor directories under samples/ at any depth
             parts = frel.parts
-            if len(parts) >= 2:
-                sample_dirs.add(REPO_ROOT / "samples" / parts[0])
-                # Also add nested dirs (e.g., security/threat detection/)
-                if len(parts) >= 3:
-                    sample_dirs.add(REPO_ROOT / "samples" / parts[0] / parts[1])
+            for depth in range(1, len(parts)):  # len(parts)-1 is the file's parent dir
+                sample_dirs.add(REPO_ROOT / "samples" / Path(*parts[:depth]))
         except ValueError:
             pass
 
         # ── YAML files ──
         if suffix in yaml_extensions:
             data = validate_yaml_syntax(f)
+            scan_secrets(f)
             if data is None:
                 continue
 
             if not is_non_workflow(f) and is_workflow_template_yaml(data):
                 validate_workflow_template(f, data, catalog)
 
-            scan_secrets(f)
-
         # ── JSON files ──
         elif suffix in json_extensions:
             data = validate_json_syntax(f)
+            scan_secrets(f)
             if data is None:
                 continue
 
             if not is_non_workflow(f) and is_workflow_json(data):
                 validate_workflow_json(f, data, catalog)
-
-            scan_secrets(f)
 
         # ── Markdown files ──
         elif suffix in md_extensions:
