@@ -38,10 +38,5 @@ jobs:
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
 
-      - name: Run validation (changed files only)
-        if: github.event_name == 'pull_request'
-        run: python scripts/validate.py --offline --changed-only
-
-      - name: Run validation (full)
-        if: github.event_name == 'push'
+      - name: Run validation
         run: python scripts/validate.py --offline

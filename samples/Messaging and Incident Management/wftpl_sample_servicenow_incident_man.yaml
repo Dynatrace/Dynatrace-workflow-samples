@@ -250,7 +250,7 @@ workflow:
       action: dynatrace.servicenow:snow-comment-on-incident
       active: true
       input:
-        number: '{result("search_incident").number}}'
+        number: '{{ result("search_incidents").number }}'
         comment: |
           Host: {{ event()["dt.entity.host"] }} 
           Event name: {{ event()["event.name"] }}
