@@ -1,0 +1,42 @@
+name: Validate Workflow Samples
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'samples/**'
+      - 'howtoimportexport/**'
+      - 'scripts/**'
+      - '.github/workflows/validate.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'samples/**'
+      - 'howtoimportexport/**'
+      - 'scripts/**'
+      - '.github/workflows/validate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history for changed-file detection
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run validation (full)
+        run: python scripts/validate.py --offline
