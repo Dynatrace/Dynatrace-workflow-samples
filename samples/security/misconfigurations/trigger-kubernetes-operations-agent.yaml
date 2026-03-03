@@ -1,0 +1,104 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2688.2
+  inputs: []
+workflow:
+  title: '[Security-AI-Demo] [Trigger] Kubernetes Operations Agent'
+  description: ''
+  schemaVersion: 3
+  trigger:
+    schedule:
+      isActive: false
+      trigger:
+        type: interval
+        intervalMinutes: 180
+      filterParameters:
+        earliestStart: '2026-01-23'
+        earliestStartTime: '17:23'
+      timezone: Europe/Vienna
+      inputs: {}
+  result: null
+  type: STANDARD
+  input:
+    scope:
+      field: k8s.cluster.name
+      value: ''
+    interval:
+      hours: 3
+    severity:
+    - CRITICAL
+    - HIGH
+  hourlyExecutionLimit: 1000
+  guide: null
+  tasks:
+    suggest_k8s_fixes:
+      name: suggest_k8s_fixes
+      input:
+        workflowId: 
+        workflowInput: "{\n  \"k8s.object\": {{ _.item[\"k8s.object\"] }},\n  \"occurences\"\
+          :  {{ _.item[\"total\"] }},\n  \"object.type\": \"{{ _.item[\"object.type\"\
+          ] }}\",\n  \"finding.title\": \"{{ _.item[\"finding.title\"] }}\",\n  \"\
+          compliance.control\": \"{{ _.item[\"compliance.control\"] }}\"\n}"
+      action: dynatrace.automations:run-workflow
+      active: true
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          get_k8s_workload_misconfigs: OK
+      withItems: item in {{ result("get_k8s_workload_misconfigs")["records"] }}
+      concurrency: 1
+      description: Modularize your workflows, run any existing workflow.
+      predecessors:
+      - get_k8s_workload_misconfigs
+    get_k8s_workload_misconfigs:
+      name: get_k8s_workload_misconfigs
+      input:
+        query: "fetch security.events, from:now()-{{input()[\"interval\"][\"hours\"\
+          ]}}h, to:now()\n| filter event.type == \"COMPLIANCE_FINDING\" and isNotNull(k8s.workload.name)\n\
+          | filter coalesce(compliance.status, compliance.result.status.level) ==\
+          \ \"FAILED\" // misconfigurations\n| filter coalesce(compliance.standard.short_name,\
+          \ \"CIS\") == \"CIS\" // CIS-only for builtin findings (deduplication)\n\
+          \n// scope filter\n| filter contains({{ input()[\"scope\"][\"field\"] }},\
+          \ \"{{ input()[\"scope\"][\"value\"] }}\")\n\n// normalization\n| fieldsAdd\
+          \ compliance.control = coalesce(compliance.control, compliance.rule.id)\n\
+          | fieldsAdd severity = upper(coalesce(dt.security.risk.level, finding.severity,\
+          \ compliance.rule.severity.level))\n| fieldsAdd finding.title = coalesce(finding.title,\
+          \ compliance.rule.title)\n| fieldsAdd compliance.standards = coalesce(compliance.standard.name,\
+          \ compliance.standards)\n\n// most recent misconfiguration per finding.id\n\
+          | fieldsAdd key = record(coalesce(compliance.rule.id, finding.id), object.id)\n\
+          | dedup key, sort: { timestamp desc }\n  \n// join baseline findings (PASSED\
+          \ or FAILED) to detect regressions\n| join [\n    fetch security.events,\
+          \ from:now()-{{input()[\"interval\"][\"hours\"] * 2}}h, to:now()-{{input()[\"\
+          interval\"][\"hours\"]}}h\n    | filter event.type == \"COMPLIANCE_FINDING\"\
+          \ and isNotNull(k8s.workload.name)\n    | filterOut compliance.result.status.level\
+          \ == \"NOT_RELEVANT\" // relevant builtin findings only\n    | filter coalesce(compliance.standard.short_name,\
+          \ \"CIS\") == \"CIS\" // CIS-only for builtin findings (deduplication)\n\
+          \    \n    // scope filter\n    | filter contains({{ input()[\"scope\"][\"\
+          field\"] }}, \"{{ input()[\"scope\"][\"value\"] }}\")\n\n    // normalization\n\
+          \    | fieldsAdd compliance.status = coalesce(compliance.status, compliance.result.status)\n\
+          \    \n    // most recent misconfiguration per finding.id\n    | fieldsAdd\
+          \ key = record(coalesce(compliance.rule.id, finding.id), object.id)\n  \
+          \  | dedup key, sort: { timestamp desc } ],\n  on: key,\n  kind: leftOuter,\n\
+          \  fields: { baseline.compliance.status = compliance.status }\n\n| summarize\
+          \ {\n    total = count(),\n    new = countIf(baseline.compliance.status\
+          \ == \"FAILED\" AND isNull(baseline.compliance.status)),\n    regressed\
+          \ = countIf(compliance.status == \"FAILED\" AND baseline.compliance.status\
+          \ != \"FAILED\"),\n    dt.source_entity = takeFirst(dt.source_entity)\n\
+          \  }, by: {\n    compliance.control,\n    severity,\n    finding.title,\n\
+          \    compliance.standards,\n    object.type\n  }\n| filter in(severity,{{\
+          \ '{\"' + input()[\"severity\"] | map('string') | join('\", \"') + '\"}'\
+          \ }})\n// fetch K8s object for exemplary workload\n| join [smartscapeNodes\
+          \ \"*\"],\n  on: {left[dt.source_entity] == right[id_classic]},\n  fields:\
+          \ { dt.smartscape_source.id = id, dt.smartscape_source.type = type, k8s.object\
+          \ },\n  kind:inner"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      description: This is a triggering workflow part of the Kubernetes misconfigurations fix use case. It is intended to work together with the Kubernetes Operations Agent as a subworkflow.
+      predecessors: []
