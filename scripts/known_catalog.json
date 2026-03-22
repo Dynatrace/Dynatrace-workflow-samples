@@ -1,0 +1,203 @@
+{
+  "_comment": "Known Dynatrace workflow app IDs and actions. Sourced from official docs, AGENTS.md, and Dynatrace Hub. Run 'python scripts/validate.py --update-catalog' to refresh from live docs.",
+  "_last_updated": "2025-07-03",
+  "_sources": [
+    "https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions",
+    "https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/default-workflow-actions",
+    "AGENTS.md"
+  ],
+  "app_ids": {
+    "dynatrace.automations": {
+      "description": "Core workflow actions (DQL, JavaScript, HTTP, Run Workflow)",
+      "doc_slug": "default-workflow-actions",
+      "actions": [
+        "execute-dql-query",
+        "run-javascript",
+        "http-function",
+        "run-workflow",
+        "sleep"
+      ]
+    },
+    "dynatrace.aws.connector": {
+      "description": "AWS Connector",
+      "doc_slug": "aws",
+      "actions": [
+        "s3-list-buckets",
+        "s3-put-object",
+        "s3-create-bucket",
+        "lambda-invoke"
+      ]
+    },
+    "dynatrace.azure.connector": {
+      "description": "Microsoft Entra ID (Azure AD) Connector",
+      "doc_slug": "microsoft-entra-id",
+      "actions": [
+        "get-groups",
+        "microsoft-entra-identity-developer-connection"
+      ]
+    },
+    "dynatrace.davis.workflow.actions": {
+      "description": "Dynatrace Intelligence (Davis) workflow actions",
+      "doc_slug": null,
+      "actions": [
+        "davis-analyze"
+      ]
+    },
+    "dynatrace.email": {
+      "description": "Email Connector",
+      "doc_slug": "email",
+      "actions": [
+        "send-email"
+      ]
+    },
+    "dynatrace.github": {
+      "description": "GitHub Connector",
+      "doc_slug": "github",
+      "actions": []
+    },
+    "dynatrace.gitlab": {
+      "description": "GitLab Connector",
+      "doc_slug": "gitlab",
+      "actions": []
+    },
+    "dynatrace.jenkins": {
+      "description": "Jenkins Connector",
+      "doc_slug": "jenkins",
+      "actions": []
+    },
+    "dynatrace.jira": {
+      "description": "Jira Connector",
+      "doc_slug": "jira",
+      "actions": [
+        "jira-create-issue",
+        "jira-update-issue",
+        "jira-add-comment",
+        "jira-transition-issue",
+        "jira-jql-search"
+      ]
+    },
+    "dynatrace.kubernetes.connector": {
+      "description": "Kubernetes Connector",
+      "doc_slug": "kubernetes-automation",
+      "actions": [
+        "delete",
+        "apply",
+        "get",
+        "list",
+        "logs",
+        "patch",
+        "rollout-restart",
+        "wait"
+      ]
+    },
+    "dynatrace.microsoft.azure.connector": {
+      "description": "Microsoft Azure Connector (ARM operations)",
+      "doc_slug": "azure",
+      "actions": [
+        "arm-authorization-role-assignments-list-for-scope",
+        "arm-compute-disks-begin-create-or-update",
+        "arm-compute-snapshots-begin-create-or-update",
+        "arm-compute-virtual-machines-begin-create-or-update",
+        "arm-compute-virtual-machines-get",
+        "arm-locks-management-locks-create-or-update-by-scope",
+        "arm-network-network-interfaces-begin-create-or-update",
+        "arm-network-network-interfaces-get",
+        "arm-network-network-security-groups-begin-create-or-update",
+        "arm-network-public-i-p-addresses-begin-create-or-update",
+        "arm-network-subnets-begin-create-or-update",
+        "arm-network-virtual-networks-begin-create-or-update",
+        "arm-resources-resource-groups-create-or-update",
+        "arm-storage-storage-accounts-update"
+      ]
+    },
+    "dynatrace.microsoft365": {
+      "description": "Microsoft 365 Connector",
+      "doc_slug": "microsoft365",
+      "actions": []
+    },
+    "dynatrace.microsoft365.connector": {
+      "description": "Discovered from docs (microsoft365)",
+      "doc_slug": "microsoft365",
+      "actions": [
+        "connection"
+      ]
+    },
+    "dynatrace.msteams": {
+      "description": "Microsoft Teams Connector",
+      "doc_slug": "microsoft-teams",
+      "actions": [
+        "send-message"
+      ]
+    },
+    "dynatrace.ownership": {
+      "description": "Ownership app",
+      "doc_slug": null,
+      "actions": [
+        "get-ownership-from-entity",
+        "import-teams-to-settings"
+      ]
+    },
+    "dynatrace.pagerduty": {
+      "description": "PagerDuty Connector",
+      "doc_slug": "pagerduty",
+      "actions": []
+    },
+    "dynatrace.redhat.ansible": {
+      "description": "Red Hat Ansible Connector",
+      "doc_slug": "red-hat/redhat-ansible",
+      "actions": [
+        "launch-job-template",
+        "send-event-to-eda"
+      ]
+    },
+    "dynatrace.servicenow": {
+      "description": "ServiceNow Connector",
+      "doc_slug": "service-now",
+      "actions": [
+        "snow-create-incident",
+        "snow-search",
+        "snow-search-incidents",
+        "snow-comment-on-incident",
+        "snow-get-groups"
+      ]
+    },
+    "dynatrace.slack": {
+      "description": "Slack Connector",
+      "doc_slug": "slack",
+      "actions": [
+        "slack-send-message",
+        "slack-send-message-user"
+      ]
+    },
+    "dynatrace.snowflake": {
+      "description": "Snowflake Connector",
+      "doc_slug": "snowflake",
+      "actions": []
+    },
+    "dynatrace.text.processing": {
+      "description": "Text Processing actions",
+      "doc_slug": "text-processing",
+      "actions": []
+    }
+  },
+  "doc_slug_to_app_id": {
+    "aws": "dynatrace.aws.connector",
+    "azure": "dynatrace.microsoft.azure.connector",
+    "default-workflow-actions": "dynatrace.automations",
+    "email": "dynatrace.email",
+    "github": "dynatrace.github",
+    "gitlab": "dynatrace.gitlab",
+    "jenkins": "dynatrace.jenkins",
+    "jira": "dynatrace.jira",
+    "kubernetes-automation": "dynatrace.kubernetes.connector",
+    "microsoft-entra-id": "dynatrace.azure.connector",
+    "microsoft-teams": "dynatrace.msteams",
+    "microsoft365": "dynatrace.microsoft365.connector",
+    "pagerduty": "dynatrace.pagerduty",
+    "red-hat/redhat-ansible": "dynatrace.redhat.ansible",
+    "service-now": "dynatrace.servicenow",
+    "slack": "dynatrace.slack",
+    "snowflake": "dynatrace.snowflake",
+    "text-processing": "dynatrace.text.processing"
+  }
+}

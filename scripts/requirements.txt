@@ -1,0 +1,2 @@
+# Dependencies for the validation CI script (scripts/validate.py)
+pyyaml>=6.0
