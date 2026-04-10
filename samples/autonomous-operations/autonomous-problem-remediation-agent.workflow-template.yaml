@@ -1,0 +1,365 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.servicenow
+      version: ^2.3.0
+    - id: dynatrace.github.connector
+      version: ^2.8.0
+    - id: dynatrace.msteams
+      version: ^0.3.13
+  inputs:
+  - type: connection
+    schema: app:dynatrace.servicenow:connection
+    targets:
+    - tasks.create_change_request.connectionId
+  - type: connection
+    schema: app:dynatrace.github.connector:connection
+    targets:
+    - tasks.read_current_config.connectionId
+    - tasks.create_remediation_pr.connectionId
+  - type: connection
+    schema: app:dynatrace.msteams:connection
+    targets:
+    - tasks.notify_team.connectionId
+workflow:
+  title: Autonomous Problem Remediation Agent
+  description: Closed-loop autonomous remediation — detects a problem via Dynatrace
+    Intelligence, analyzes root cause with AI, proposes a config fix as a GitOps pull
+    request, creates a ServiceNow change request for approval, and notifies the team
+    via Microsoft Teams.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            resource: true
+            slowdown: true
+            availability: true
+          entityTags: {}
+          customFilter: ''
+          analysisReady: true
+          onProblemClose: false
+          entityTagsMatch: all
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 100
+  guide: '# Autonomous Problem Remediation Agent
+
+
+    This workflow demonstrates fully autonomous, hands-off problem remediation. When
+    Dynatrace Intelligence detects a problem, the workflow automatically analyzes the
+    root cause, proposes a configuration fix, opens a pull request on your GitOps repository,
+    creates a ServiceNow change request for governance approval, and notifies your
+    team via Microsoft Teams.
+
+
+    **Approval is modeled as a dual gate**: the ServiceNow change request provides
+    ITSM governance, while the GitHub pull request enables code review before any change
+    is applied.
+
+
+    # Setup
+
+
+    This workflow requires connections to ServiceNow, GitHub, and Microsoft Teams.
+
+
+    **ServiceNow connection**: Go to **Settings** > **Connections** > [ServiceNow](/ui/apps/dynatrace.settings/settings/dynatrace.servicenow)
+    > **+ Connection**, provide your ServiceNow instance details, and click **Create**.
+    For details, see [ServiceNow documentation](https://dt-url.net/it03naf).
+
+
+    **GitHub connection**: Go to **Settings** > **Connections** > [GitHub](/ui/apps/dynatrace.settings/settings/dynatrace.github.connector)
+    > **+ Connection**. For details, see [Set up GitHub integration](https://dt-url.net/sz02zyb).
+
+
+    **Microsoft Teams connection**: Go to **Settings** > **Connections** > [Microsoft
+    Teams](/ui/apps/dynatrace.settings/settings/dynatrace.msteams) > **+ Connection**.
+
+
+    # Trigger
+
+
+    This workflow uses a problem [trigger](?trigger=) configured for error, resource,
+    slowdown, and availability categories with analysis-ready events. Customize entity
+    tag filters to scope to specific services.
+
+
+    # Gather context (parallel)
+
+
+    Tasks [gather_problem_context](?task=gather_problem_context&tab=input) and [gather_metrics](?task=gather_metrics&tab=input)
+    run in parallel to collect problem details, affected entity logs, and key performance
+    metrics.
+
+
+    # AI analysis
+
+
+    Task [analyze_and_recommend](?task=analyze_and_recommend&tab=input) sends the collected
+    context to Dynatrace Intelligence, which performs root cause analysis and proposes
+    a specific remediation action including a configuration change.
+
+
+    # GitOps pull request
+
+
+    Tasks [read_current_config](?task=read_current_config&tab=input) and [generate_remediation_patch](?task=generate_remediation_patch&tab=input)
+    read the current configuration from your GitOps repository and prepare the updated
+    version. Task [create_remediation_pr](?task=create_remediation_pr&tab=input) commits
+    the change to a feature branch and opens a pull request.
+
+
+    Configure the **owner**, **repository**, and **filePath** fields in the GitHub
+    tasks to point to your GitOps repository.
+
+
+    # ServiceNow change request
+
+
+    Task [create_change_request](?task=create_change_request&tab=input) creates a change
+    request that includes the AI analysis, risk assessment, and a link to the pull
+    request. This serves as the ITSM approval gate — the change is not applied until
+    both the CR and the PR are approved.
+
+
+    # Team notification
+
+
+    Task [notify_team](?task=notify_team&tab=input) sends an Adaptive Card to Microsoft
+    Teams with links to the Dynatrace problem, the pull request, and the ServiceNow
+    change request.'
+  tasks:
+    gather_problem_context:
+      name: gather_problem_context
+      input:
+        query: |-
+          fetch events
+          | filter event.kind == "DAVIS_PROBLEM"
+          | filter event.id == "{{ event()['event.id'] }}"
+          | fields event.id, event.name, event.category, event.status,
+                  display_id, start_time, end_time,
+                  affected_entity_ids, root_cause_entity_id,
+                  evidence_details, management_zones
+          | limit 1
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 1
+      description: Fetch problem details, affected entities, and evidence from Grail
+      predecessors: []
+    gather_metrics:
+      name: gather_metrics
+      input:
+        query: |-
+          fetch logs, from:now()-1h
+          | filter in(dt.entity.host, array({{ event()['dt.entity.host'] | default('"N/A"') }}))
+          | sort timestamp desc
+          | limit 30
+          | fields timestamp, content, log.source, loglevel, dt.entity.host
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 1
+      description: Fetch recent logs and metrics for affected entities
+      predecessors: []
+    analyze_and_recommend:
+      name: analyze_and_recommend
+      input:
+        config: disabled
+        prompt: |-
+          You are an SRE automation agent. Analyze the following problem and recent logs
+          to determine the root cause and propose a specific remediation.
+
+          PROBLEM CONTEXT:
+          {{ result('gather_problem_context') }}
+
+          RECENT LOGS:
+          {{ result('gather_metrics') }}
+
+          Provide your response in this exact structure:
+          1. ROOT CAUSE: One-sentence root cause summary
+          2. IMPACT: Affected services and estimated user impact
+          3. REMEDIATION: Specific configuration change needed (e.g., increase replica count,
+             adjust resource limits, update connection pool size)
+          4. RISK ASSESSMENT: Low/Medium/High with justification
+          5. CONFIG PATCH: The exact YAML snippet to apply to the deployment manifest
+        autoTrim: true
+        supplementary: ''
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          gather_problem_context: OK
+          gather_metrics: OK
+      description: Dynatrace Intelligence analyzes root cause and proposes remediation
+      predecessors:
+      - gather_problem_context
+      - gather_metrics
+    read_current_config:
+      name: read_current_config
+      input:
+        owner: ''
+        filePath: deploy/deployment.yaml
+        reference: main
+        repository: ''
+        connectionId: ''
+      action: dynatrace.github.connector:get-content
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          analyze_and_recommend: OK
+      description: Read current deployment config from GitOps repository
+      predecessors:
+      - analyze_and_recommend
+    generate_remediation_patch:
+      name: generate_remediation_patch
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const aiResult = await ex.result('analyze_and_recommend');
+            const currentConfig = await ex.result('read_current_config');
+
+            const analysis = aiResult['text'];
+            const configContent = currentConfig['content'];
+
+            // Extract the CONFIG PATCH section from AI response
+            const patchMatch = analysis.match(/CONFIG PATCH:\s*([\s\S]*?)$/i);
+            const suggestedPatch = patchMatch ? patchMatch[1].trim() : '';
+
+            // Build commit message from root cause
+            const rootCauseMatch = analysis.match(/ROOT CAUSE:\s*(.+)/i);
+            const rootCause = rootCauseMatch ? rootCauseMatch[1].trim() : 'AI-recommended remediation';
+
+            return {
+              updatedConfig: configContent,
+              suggestedPatch: suggestedPatch,
+              commitMessage: `fix: ${rootCause}`,
+              fullAnalysis: analysis
+            };
+          }
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 4
+      conditions:
+        states:
+          read_current_config: OK
+      description: Generate remediation config patch based on AI recommendation
+      predecessors:
+      - read_current_config
+    create_remediation_pr:
+      name: create_remediation_pr
+      input:
+        owner: ''
+        branch: remediation/{{ event()['event.id'] }}
+        filePath: deploy/deployment.yaml
+        repository: ''
+        fileContent: '{{ result("generate_remediation_patch")["updatedConfig"] }}'
+        connectionId: ''
+        sourceBranch: main
+        commitMessage: '{{ result("generate_remediation_patch")["commitMessage"] }}'
+        createNewBranch: true
+      action: dynatrace.github.connector:create-or-replace-file
+      position:
+        x: 0
+        y: 5
+      conditions:
+        states:
+          generate_remediation_patch: OK
+      description: Create pull request with remediation changes on GitOps repository
+      predecessors:
+      - generate_remediation_patch
+    create_change_request:
+      name: create_change_request
+      input:
+        fields:
+        - id: 7a1b2c3d-4e5f-6a7b-8c9d-0e1f2a3b4c5d
+          key: short_description
+          value: '[Auto-Remediation] {{ event()["event.category"] }} — {{ event()["event.name"]
+            }}'
+        - id: 8b2c3d4e-5f6a-7b8c-9d0e-1f2a3b4c5d6e
+          key: description
+          value: "Autonomous remediation proposed by Dynatrace Intelligence.\n\nProblem:\
+            \ {{ event()['event.name'] }}\nProblem ID: {{ event()['event.id'] }}\n\
+            \nAI Analysis:\n{{ result('generate_remediation_patch')['fullAnalysis']\
+            \ }}\n\nPull Request: Created on branch remediation/{{ event()['event.id']\
+            \ }}\nWorkflow Execution: {{ execution().link }}"
+        - id: 9c3d4e5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f
+          key: category
+          value: Software
+        - id: 0d4e5f6a-7b8c-9d0e-1f2a-3b4c5d6e7f8a
+          key: impact
+          value: '3'
+        - id: 1e5f6a7b-8c9d-0e1f-2a3b-4c5d6e7f8a9b
+          key: risk
+          value: Moderate
+        - id: 2f6a7b8c-9d0e-1f2a-3b4c-5d6e7f8a9b0c
+          key: correlation_id
+          value: DT_{{ event()["event.id"] }}
+        tableName: change_request
+        connectionId: ''
+      action: dynatrace.servicenow:snow-create-record
+      position:
+        x: 0
+        y: 6
+      conditions:
+        states:
+          create_remediation_pr: OK
+      description: Create ServiceNow change request for approval governance
+      predecessors:
+      - create_remediation_pr
+    notify_team:
+      name: notify_team
+      input:
+        message: "{\n  \"type\": \"AdaptiveCard\",\n  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\"\
+          ,\n  \"version\": \"1.4\",\n  \"body\": [\n    {\n      \"type\": \"TextBlock\"\
+          ,\n      \"size\": \"Medium\",\n      \"weight\": \"Bolder\",\n      \"\
+          text\": \"\U0001F916 Autonomous Remediation Proposed\"\n    },\n    {\n \
+          \     \"type\": \"FactSet\",\n      \"facts\": [\n        {\n          \"\
+          title\": \"Problem\",\n          \"value\": \"{{ event()['event.name'] }}\"\
+          \n        },\n        {\n          \"title\": \"Category\",\n          \"\
+          value\": \"{{ event()['event.category'] }}\"\n        },\n        {\n  \
+          \        \"title\": \"Change Request\",\n          \"value\": \"{{ result('create_change_request')['number']\
+          \ | default('pending') }}\"\n        },\n        {\n          \"title\":\
+          \ \"Status\",\n          \"value\": \"Awaiting dual approval (ServiceNow\
+          \ CR + GitHub PR)\"\n        }\n      ]\n    },\n    {\n      \"type\": \"\
+          TextBlock\",\n      \"text\": \"A pull request and change request have been\
+          \ created. The remediation will be applied once both are approved.\",\n \
+          \     \"wrap\": true,\n      \"spacing\": \"Medium\"\n    },\n    {\n  \
+          \    \"type\": \"ActionSet\",\n      \"actions\": [\n        {\n        \
+          \  \"type\": \"Action.OpenUrl\",\n          \"title\": \"View Problem in\
+          \ Dynatrace\",\n          \"url\": \"{{ problem_link() }}\"\n        },\n\
+          \        {\n          \"type\": \"Action.OpenUrl\",\n          \"title\"\
+          : \"View Change Request\",\n          \"url\": \"{{ result('create_change_request')['url']\
+          \ | default('#') }}\"\n        },\n        {\n          \"type\": \"Action.OpenUrl\"\
+          ,\n          \"title\": \"View Workflow Execution\",\n          \"url\":\
+          \ \"{{ execution().link }}\"\n        }\n      ]\n    }\n  ]\n}"
+        connectionId: ''
+      action: dynatrace.msteams:send-message
+      position:
+        x: 0
+        y: 7
+      conditions:
+        states:
+          create_change_request: OK
+      description: Send remediation summary to Microsoft Teams
+      predecessors:
+      - create_change_request

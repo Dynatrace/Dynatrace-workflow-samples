@@ -1,0 +1,212 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.servicenow
+      version: ^2.3.0
+    - id: dynatrace.slack
+      version: ^3.4.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.servicenow:connection
+    targets:
+    - tasks.search_incidents.connectionId
+  - type: connection
+    schema: app:dynatrace.slack:connection
+    targets:
+    - tasks.send_message.connection
+workflow:
+  title: Search for ServiceNow incidents and notify via Slack
+  description: Searches for Incidents in ServiceNow, and forwards them to Slack.
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Setup\n\nThis workflow requires connections to both ServiceNow and Slack.\n\
+    \n**ServiceNow connection**: If your environment doesn't already have a ServiceNow\
+    \ connection, you'll need to create one. Go to **Settings** > **Connections**\
+    \ > [ServiceNow](/ui/apps/dynatrace.settings/settings/dynatrace.servicenow) >\
+    \ **+ Connection**, provide your ServiceNow instance details, and click **Create**.\
+    \ For details on how to configure the integration, see [ServiceNow documentation](https://dt-url.net/it03naf).\n\
+    \n**Slack connection**: If your environment doesn't already have a Slack connection,\
+    \ you'll need to create one. For detailed instructions, see [Set up Slack integration](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions/slack).\n\
+    \n# Trigger\n\nBy default, this workflow uses an on-demand [trigger](?trigger=).\
+    \ You can leave it as-is to trigger the workflow manually or via API.\n\nYou can\
+    \ update the trigger to run on a schedule (for example, daily or weekly at a specific\
+    \ time for regular incident summaries).\n\n# Configure search criteria\n\nIn the\
+    \ task [search_incidents](?task=search_incidents&tab=input), customize the search\
+    \ query to find relevant incidents:\n\n- **Time range**: The default query searches\
+    \ for incidents created in the last 7 days using `sys_created_on>=javascript:gs.daysAgoStart(7)`.\
+    \ Modify the number to change the timeframe.\n- **Additional filters**: Add filters\
+    \ to the `sysparmQuery` field using ServiceNow query syntax:\n  - `^active=true`\
+    \ to search only active incidents\n  - `^state=1` to filter by state (1=New, 2=In\
+    \ Progress, 6=Resolved, 7=Closed)\n  - `^correlation_id=DT_XXX` to find incidents\
+    \ linked to specific Dynatrace problems\n- **Result limit**: Adjust `sysparmLimit`\
+    \ to control the maximum number of incidents returned (default: 100)\n\nThe results\
+    \ are automatically sorted by newest first.\n\n# Customize the summary message\n\
+    \nIn the task [create_message](?task=create_message&tab=input), you can modify\
+    \ the JavaScript code to customize the summary format:\n\n- **ServiceNow URL**:\
+    \ Update the `serviceNowBaseUrl` parameter (currently `https://ven01383.service-now.com`)\
+    \ to match your instance\n- **Statistics displayed**: The default summary includes\
+    \ Status, State, and Priority breakdowns\n- **Number of incidents listed**: Currently\
+    \ shows the top 5 most recent incidents. Change the value in `incidents.slice(0,\
+    \ 5)` to display more or fewer\n- **Message formatting**: Customize text, emojis,\
+    \ and layout to match your team's preferences\n\n# Configure the notification\n\
+    \nIn the task [send_message](?task=send_message&tab=input), specify the Slack\
+    \ channel where notifications will be sent:\n\n- **Channel**: Update the `channel`\
+    \ field with your Slack channel ID\n- **Message content**: The message automatically\
+    \ includes incident statistics, recent incident details, and a link to the workflow\
+    \ execution\n- **Reactions**: Add emoji reactions by modifying the `reaction`\
+    \ field if needed"
+  tasks:
+    send_message:
+      name: send_message
+      input:
+        channel: C080F2TKR1D
+        message: '{{ result("create_message")["message"] }}
+
+
+          :link: *Quick Links:*
+
+          • <{{execution().link}}|View Workflow Execution>'
+        reaction: []
+        connection: ''
+        channelType: id
+        executionDate: '{{ execution().started_at }}'
+        appendToThread: false
+        replyBroadcast: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      action: dynatrace.slack:slack-send-message
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          create_message: OK
+      description: Send a message to a Slack workspace
+      predecessors:
+      - create_message
+    create_message:
+      name: create_message
+      input:
+        script: "// optional import of sdk modules\nimport { execution, result } from\
+          \ '@dynatrace-sdk/automation-utils';\n\n/**\n * Generates a formatted Slack\
+          \ message summarizing ServiceNow incidents\n * @param {Array} incidents\
+          \ - Array of ServiceNow incident objects\n * @param {string} serviceNowBaseUrl\
+          \ - Base URL for ServiceNow instance (e.g., 'https://ven01383.service-now.com')\n\
+          \ * @returns {string} Formatted Slack message using Slack markdown\n */\n\
+          function generateIncidentSummaryMessage(incidents, serviceNowBaseUrl = 'https://ven01383.service-now.com')\
+          \ {\n  if (!incidents || incidents.length === 0) {\n    return ':white_check_mark:\
+          \ *No incidents found*';\n  }\n\n  // Calculate statistics\n  const stats\
+          \ = calculateIncidentStats(incidents);\n  \n  // Build message sections\n\
+          \  const header = buildHeader(incidents.length);\n  const statsSection =\
+          \ buildStatsSection(stats);\n  const incidentsList = buildIncidentsList(incidents,\
+          \ serviceNowBaseUrl);\n  \n  return `${header}\\n\\n${statsSection}\\n\\\
+          n${incidentsList}`;\n}\n\n/**\n * Calculate statistics from incidents array\n\
+          \ * @param {Array} incidents - Array of incidents\n * @returns {Object}\
+          \ Statistics object\n */\nfunction calculateIncidentStats(incidents) {\n\
+          \  const stats = {\n    total: incidents.length,\n    active: 0,\n    byState:\
+          \ {},\n    byPriority: {},\n  };\n\n  incidents.forEach(incident => {\n\
+          \    // Active incidents\n    if (incident.active === 'true') {\n      stats.active++;\n\
+          \    }\n\n    // Group by state\n    const stateName = getStateName(incident.state);\n\
+          \    stats.byState[stateName] = (stats.byState[stateName] || 0) + 1;\n\n\
+          \    // Group by priority\n    const priority = `P${incident.priority}`;\n\
+          \    stats.byPriority[priority] = (stats.byPriority[priority] || 0) + 1;\n\
+          \  });\n\n  return stats;\n}\n\n/**\n * Build header section\n * @param\
+          \ {number} totalCount - Total incident count\n * @returns {string} Header\
+          \ message\n */\nfunction buildHeader(totalCount) {\n  const emoji = totalCount\
+          \ > 0 ? ':mag_right:' : ':white_check_mark:';\n  return `${emoji} *ServiceNow\
+          \ Incident Search Results*\\n*Found ${totalCount} incident${totalCount !==\
+          \ 1 ? 's' : ''}*`;\n}\n\n/**\n * Build statistics section\n * @param {Object}\
+          \ stats - Statistics object\n * @returns {string} Stats section\n */\nfunction\
+          \ buildStatsSection(stats) {\n  const sections = [];\n\n  // Active/Inactive\
+          \ breakdown\n  const inactive = stats.total - stats.active;\n  sections.push(`*Status\
+          \ Overview:*`);\n  sections.push(`• Active: ${stats.active} :large_green_circle:`);\n\
+          \  sections.push(`• Inactive: ${inactive} :white_circle:`);\n\n  // State\
+          \ breakdown\n  if (Object.keys(stats.byState).length > 0) {\n    sections.push(`\\\
+          n*By State:*`);\n    Object.entries(stats.byState)\n      .sort((a, b) =>\
+          \ b[1] - a[1])\n      .forEach(([state, count]) => {\n        sections.push(`•\
+          \ ${state}: ${count}`);\n      });\n  }\n\n  // Priority breakdown\n  if\
+          \ (Object.keys(stats.byPriority).length > 0) {\n    sections.push(`\\n*By\
+          \ Priority:*`);\n    Object.entries(stats.byPriority)\n      .sort((a, b)\
+          \ => a[0].localeCompare(b[0]))\n      .forEach(([priority, count]) => {\n\
+          \        const emoji = getPriorityEmoji(priority);\n        sections.push(`•\
+          \ ${priority}: ${count} ${emoji}`);\n      });\n  }\n\n  return sections.join('\\\
+          n');\n}\n\n/**\n * Build incidents list section\n * @param {Array} incidents\
+          \ - Array of incidents\n * @param {string} baseUrl - ServiceNow base URL\n\
+          \ * @returns {string} Incidents list\n */\nfunction buildIncidentsList(incidents,\
+          \ baseUrl) {\n  const sections = [`*Recent Incidents:*`];\n  \n  // Show\
+          \ top 5 incidents\n  const topIncidents = incidents.slice(0, 5);\n  \n \
+          \ topIncidents.forEach((incident, index) => {\n    const url = `${baseUrl}/nav_to.do?uri=incident.do?sys_id=${incident.sys_id}`;\n\
+          \    const statusEmoji = incident.active === 'true' ? ':red_circle:' : ':white_circle:';\n\
+          \    const priorityEmoji = getPriorityEmoji(`P${incident.priority}`);\n\
+          \    \n    sections.push(`\\n${index + 1}. <${url}|*${incident.number}*>\
+          \ ${statusEmoji} ${priorityEmoji}`);\n    sections.push(`   _${truncateText(incident.short_description,\
+          \ 80)}_`);\n    sections.push(`   Priority ${incident.priority} • ${getStateName(incident.state)}\
+          \ • Opened: ${formatDate(incident.opened_at)}`);\n  });\n\n  if (incidents.length\
+          \ > 5) {\n    sections.push(`\\n_...and ${incidents.length - 5} more incident${incidents.length\
+          \ - 5 !== 1 ? 's' : ''}_`);\n  }\n\n  return sections.join('\\n');\n}\n\n\
+          /**\n * Get state name from state code\n * @param {string} stateCode - State\
+          \ code\n * @returns {string} State name\n */\nfunction getStateName(stateCode)\
+          \ {\n  const stateMap = {\n    '1': 'New',\n    '2': 'In Progress',\n  \
+          \  '3': 'On Hold',\n    '6': 'Resolved',\n    '7': 'Closed',\n    '8': 'Canceled',\n\
+          \  };\n  return stateMap[stateCode] || `State ${stateCode}`;\n}\n\n/**\n\
+          \ * Get emoji for priority level\n * @param {string} priority - Priority\
+          \ level (e.g., 'P1', 'P5')\n * @returns {string} Emoji\n */\nfunction getPriorityEmoji(priority)\
+          \ {\n  const emojiMap = {\n    'P1': ':rotating_light:',\n    'P2': ':large_orange_diamond:',\n\
+          \    'P3': ':large_yellow_circle:',\n    'P4': ':large_blue_circle:',\n\
+          \    'P5': ':white_circle:',\n  };\n  return emojiMap[priority] || '';\n\
+          }\n\n/**\n * Format date string\n * @param {string} dateString - Date string\n\
+          \ * @returns {string} Formatted date\n */\nfunction formatDate(dateString)\
+          \ {\n  if (!dateString) return 'N/A';\n  const date = new Date(dateString);\n\
+          \  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric',\
+          \ year: 'numeric' });\n}\n\n/**\n * Truncate text to specified length\n\
+          \ * @param {string} text - Text to truncate\n * @param {number} maxLength\
+          \ - Maximum length\n * @returns {string} Truncated text\n */\nfunction truncateText(text,\
+          \ maxLength) {\n  if (!text) return '';\n  if (text.length <= maxLength)\
+          \ return text;\n  return text.substring(0, maxLength - 3) + '...';\n}\n\n\
+          // Generate a message for Slack\nexport default async function () {\n  const\
+          \ incidents = await result('search_incidents');\n  const ex = await execution();\n\
+          \n  console.log(JSON.stringify(ex));\n  \n  const message = generateIncidentSummaryMessage(incidents,\
+          \ 'https://ven01383.service-now.com');\n  \n  return { triggeredBy: ex.trigger,\
+          \ message };\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          search_incidents: OK
+      description: Run custom JavaScript code.
+      predecessors:
+      - search_incidents
+      customSampleResult:
+        message: ':mag_right: *ServiceNow Incident Search Results*\n*Found 12 incidents*\n\n*Status
+          Overview:*\n• Active: 8 :green_circle:\n• Inactive: 4 :white_circle:\n\n*By
+          State:*\n• New: 5\n• In Progress: 3\n• Resolved: 4\n\n*By Priority:*\n•
+          P1: 2 :rotating_light:\n• P3: 5 :large_yellow_circle:\n• P5: 5 :white_circle:\n\n*By
+          Category:*\n• inquiry: 8\n• software: 3\n• hardware: 1\n\n*Performance Metrics:*\n•
+          Met SLA: 10/12 (83.3%)\n• Reopened: 2 :warning:\n\n*Recent Incidents:*\n\n1.
+          <https://ven01383.service-now.com/nav_to.do?uri=incident.do?sys_id=xxx|*INC0948702*>
+          :red_circle: :white_circle:\n   _ERROR AWS Monitoring profile Dynatrace
+          CSPM Automation is in ERROR State_\n   Priority 5 • New • Opened: Jan 22,
+          2026\n\n...and 7 more incidents'
+        triggeredBy: someone@dynatrace.com
+    search_incidents:
+      name: search_incidents
+      input:
+        connectionId: ''
+        sysparmLimit: '100'
+        sysparmQuery: sys_created_on>=javascript:gs.daysAgoStart(7)^ORDERBYDESCsys_created_on
+        sysparmFields: ''
+      action: dynatrace.servicenow:snow-search-incidents
+      position:
+        x: 0
+        y: 1
+      description: Search for incidents in ServiceNow
+      predecessors: []

@@ -1,0 +1,198 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.github.connector
+      version: ^2.8.0
+    - id: dynatrace.text.processing
+      version: ^1.1.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.github.connector:connection
+    targets:
+    - tasks.get_package_json.connectionId
+    - tasks.commit_version_sync.connectionId
+    - tasks.get_package_lock_json.connectionId
+workflow:
+  title: Package version sync
+  description: ''
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Package version sync\n\nThis workflow synchronizes versions between package.json\
+    \ and package-lock.json in a GitHub repository. If versions differ, it updates\
+    \ package-lock.json to match package.json and commits the corrected file.\n\n\
+    # Setup\n\nIf your environment doesn't already have a GitHub connection, you'll\
+    \ need to create one.\nFor detailed instructions, see [Set up GitHub integration](https://dt-url.net/sz02zyb).\n\
+    \n# Trigger\n\nBy default, this workflow uses an on-demand [trigger](?trigger=).\
+    \ You can leave it as-is to trigger the workflow manually or via API.\n\nYou can\
+    \ update the trigger to run on a schedule (for example, daily or weekly at a specific\
+    \ time).\n\n# Get package.json\n\nIn the task [get_package_json](?task=get_package_json&tab=input),\
+    \ configure the GitHub repository details:\n\n- **Owner**: Set the repository\
+    \ owner (organization or user)\n- **Repository**: Set the repository name\n- **Reference**:\
+    \ Set the branch or ref (for example, `main`)\n- **Path**: Keep as `package.json`\n\
+    \n# Get package-lock.json\n\nIn the task [get_package_lock_json](?task=get_package_lock_json&tab=input),\
+    \ configure the same repository details:\n\n- **Owner**: Set the repository owner\
+    \ (must match the previous task)\n- **Repository**: Set the repository name (must\
+    \ match the previous task)\n- **Reference**: Set the branch or ref (for example,\
+    \ `main`)\n- **Path**: Keep as `package-lock.json`\n\n# Extract versions\n\nThe\
+    \ workflow uses two text processing tasks to extract version information:\n\n\
+    - **get_version**: Extracts the version from `package.json` using path `.version`\n\
+    - **get_lock_version**: Extracts the version from `package-lock.json` using path\
+    \ `.version`\n\nThese tasks are preconfigured and typically don't require modification.\n\
+    \n# Set version in lockfile\n\nThe task **set_version_in_lockfile** updates the\
+    \ version in `package-lock.json` using semantic version parsing.\n\nThe value\
+    \ field uses this Jinja expression to parse and compare versions:\n```jinja\n\
+    {%- set semver = (\n  (result(\"get_version\")[\"json\"] | string | trim).split('.')[0]\
+    \ | int,\n  ((result(\"get_version\")[\"json\"] | string | trim).split('.')[1]\
+    \ | default('0') | int),\n  ((result(\"get_version\")[\"json\"] | string | trim).split('.')[2]\
+    \ | default('0') | int)\n)\n-%}\n\n{{ result(\"get_version\")[\"json\"] }}\n```\n\
+    \nThis task only runs when versions differ between the two files.\n\n# Set lockfile\
+    \ root package version\n\nThe task **set_lockfile_root_package_version** updates\
+    \ the root package version for npm v7+ lockfiles.\n\nIt sets the `packages[\"\"\
+    ].version` field to ensure consistency across the lockfile structure. This task\
+    \ depends on `set_version_in_lockfile` completing successfully.\n\n# Commit changes\n\
+    \nIn the task [commit_version_sync](?task=commit_version_sync&tab=input), configure\
+    \ where to commit the synchronized file:\n\n- **Owner**: Set the repository owner\
+    \ (must match earlier tasks)\n- **Repository**: Set the repository name (must\
+    \ match earlier tasks)\n- **Branch**: Set the target branch for the commit\n-\
+    \ **File path**: Automatically set based on which file needs updating\n- **Commit\
+    \ message**: Customize if needed (default includes the synchronized version)\n\
+    \n# Customization examples\n\n1. **Change commit message format**\n   In the [commit_version_sync](?task=commit_version_sync&tab=input)\
+    \ task, update the **Message** field:\n   ```\n   chore: sync package version\
+    \ to {{ result(\"get_version\")[\"json\"] | string | trim }}\n   ```\n\n2. **Target\
+    \ a different branch**\n   Update the Reference field in all GitHub tasks to point\
+    \ to your desired branch.\n\n3. **Run on a schedule**\n   Change the trigger to\
+    \ a schedule trigger and set a reasonable interval (for example, weekdays at 9:00\
+    \ AM)."
+  tasks:
+    get_version:
+      name: get_version
+      input:
+        json: '{{result("get_package_json")["content"]}}'
+        path: .version
+      action: dynatrace.text.processing:get-json-value
+      position:
+        x: -1
+        y: 2
+      conditions:
+        states:
+          get_package_json: OK
+      description: Retrieves the version from the package file
+      predecessors:
+      - get_package_json
+    get_lock_version:
+      name: get_lock_version
+      input:
+        json: '{{result("get_package_lock_json")["content"]}}'
+        path: .version
+      action: dynatrace.text.processing:get-json-value
+      position:
+        x: 1
+        y: 2
+      conditions:
+        states:
+          get_package_lock_json: OK
+      description: Retrieves the version from the package-lock file
+      predecessors:
+      - get_package_lock_json
+    get_package_json:
+      name: get_package_json
+      input:
+        owner: ''
+        filePath: package.json
+        reference: main
+        repository: ''
+        connectionId: ''
+      action: dynatrace.github.connector:get-content
+      position:
+        x: -1
+        y: 1
+      description: Retrieves the content of the package.json in a repository
+      predecessors: []
+    commit_version_sync:
+      name: commit_version_sync
+      input:
+        owner: ''
+        branch: sync-version-package-lock
+        filePath: package-lock.json
+        repository: ''
+        fileContent: '{{result("set_lockfile_root_package_version")["json"]}}'
+        connectionId: ''
+        sourceBranch: main
+        commitMessage: 'chore: harmonize package versions'
+        createNewBranch: true
+      action: dynatrace.github.connector:create-or-replace-file
+      position:
+        x: 0
+        y: 5
+      conditions:
+        custom: '{{ result("get_lock_version")["json"] != result("get_version")["json"]
+          }}'
+        states:
+          set_lockfile_root_package_version: OK
+      description: Replaces the updated package file
+      predecessors:
+      - set_lockfile_root_package_version
+    get_package_lock_json:
+      name: get_package_lock_json
+      input:
+        owner: ''
+        filePath: package-lock.json
+        reference: main
+        repository: ''
+        connectionId: ''
+      action: dynatrace.github.connector:get-content
+      position:
+        x: 1
+        y: 1
+      description: Retrieves the content of a package-lock.json in a repository
+      predecessors: []
+    set_version_in_lockfile:
+      name: set_version_in_lockfile
+      input:
+        json: '{{result("get_package_lock_json")["content"]}}'
+        path: .version
+        value: "{%- set semver = (\n  (result(\"get_version\")[\"json\"] | string\
+          \ | trim).split('.')[0] | int,\n  ((result(\"get_version\")[\"json\"] |\
+          \ string | trim).split('.')[1] | default('0') | int),\n  ((result(\"get_version\"\
+          )[\"json\"] | string | trim).split('.')[2] | default('0') | int)\n) \n-%}\n\
+          \n{{ result(\"get_version\")[\"json\"] }}"
+      action: dynatrace.text.processing:set-json-value
+      position:
+        x: 0
+        y: 3
+      conditions:
+        else: SKIP
+        custom: '{{ result("get_lock_version")["json"] != result("get_version")["json"]
+          }}'
+        states:
+          get_version: OK
+          get_lock_version: OK
+      description: Sets the lock file version via semantic version comparison
+      predecessors:
+      - get_version
+      - get_lock_version
+    set_lockfile_root_package_version:
+      name: set_lockfile_root_package_version
+      input:
+        json: '{{result("set_version_in_lockfile")["json"]}}'
+        path: .packages.[""].version
+        value: '{{ result("get_version")["json"] | string | replace(''\n'','''') |
+          replace(''\r'','''') | replace(''\t'','''') | trim }}'
+      action: dynatrace.text.processing:set-json-value
+      position:
+        x: 0
+        y: 4
+      conditions:
+        else: SKIP
+        custom: '{{ result("get_lock_version")["json"] != result("get_version")["json"]
+          }}'
+        states:
+          set_version_in_lockfile: OK
+      description: Set the package root version of the lockfile
+      predecessors:
+      - set_version_in_lockfile

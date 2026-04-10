@@ -1,0 +1,70 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+  inputs: []
+workflow:
+  title: 02_Dispatch pending analysis
+  description: version=v9,cid=051f4c9ffc08d1bcf9ee4115a8f6cb1bcb68040f
+  schemaVersion: 4
+  trigger:
+    schedule:
+      isActive: true
+      trigger:
+        type: interval
+        intervalMinutes: 1
+      filterParameters:
+        earliestStart: '2025-11-09'
+        earliestStartTime: '12:49'
+      timezone: Europe/Vienna
+      inputs: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 70
+  guide: "The workflow runs every 1 minute. The trigger interval can be adapted to\n\
+    your needs. It picks up the queued problems and forwards these for processing\n\
+    to `03_Check eligibility and invoke AWS DevOps Agent`.\n\n**WARNING:** when installting\n\
+    the workflow through the `Create workflow from template` wizard please consider\n\
+    the following:\n\n* Install the workflow `DevOps Agent - 3. Callout DevOps Agent`\n\
+    first.\n* Once done go the this workflow's step `run_analysis` and select the\n\
+    workflow `03_Check eligibility and invoke AWS DevOps Agent` workflow in the\\\n\
+    *Run workflow* option.\n* Finally make sure that the *Input* is set to:\n```\n\
+    {\n  \"problemId\": \"{{ _.item.problemId }}\"\n}\n```"
+  tasks:
+    run_analysis:
+      name: run_analysis
+      input:
+        workflowId: a35242dd-43aa-4612-8463-8c0ca3c4cd03
+        workflowInput: "{\n  \"problemId\": \"{{ _.item.problemId }}\"\n}"
+      action: dynatrace.automations:run-workflow
+      position:
+        x: 0
+        y: 2
+      conditions:
+        custom: ''
+        states:
+          pending_analysis: OK
+      withItems: item in {{result("pending_analysis").records}}
+      concurrency: 1
+      description: Trigger triaging and analysis workflow
+      predecessors:
+      - pending_analysis
+    pending_analysis:
+      name: pending_analysis
+      input:
+        query: "fetch bizevents, from: now()-30m\n| filter event.category == \"awsDevOpsAgent\"\
+          \n| filter event.type == \"readyForAnalysis\"\n| filter not problemId in\
+          \ [\n  fetch bizevents, from: now()-60m\n  | filter event.category == \"\
+          awsDevOpsAgent\"\n  | filter event.type == \"processed\"\n  | summarize\
+          \ collectDistinct(problemId)]\n| lookup [fetch dt.davis.problems ], sourceField:\
+          \ problemId, lookupField: event.id, fields: dt.analysis.ready\n| filter\
+          \ dt.analysis.ready == true\n"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      description: Collect all yet unprocessed Dynatrace Problems
+      predecessors: []

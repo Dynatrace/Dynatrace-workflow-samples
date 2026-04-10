@@ -1,0 +1,132 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+  inputs: []
+workflow:
+  title: 04_Handle AWS DevOps Agent investigation responses
+  description: version=v9,cid=051f4c9ffc08d1bcf9ee4115a8f6cb1bcb68040f
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: event
+        value:
+          query: not isNull(problemEventId) and eventType == "JOURNAL_RECORD_CREATED"
+            and matchesPhrase(journalRecord, "\"record_type\":\"investigation_summary\"")
+          eventType: events
+  result: null
+  type: STANDARD
+  input:
+    createTSGNotebooks: false
+  hourlyExecutionLimit: 50
+  guide: 'This workflow processes AWS DevOps Agent results sent to the Dynatrace generic
+    events ingest endpoint. AWS DevOps Agent results (type: `investigation_summary`)
+    will appear in Dynatrace within 5–15 minutes, but be aware that investigations
+    may also take longer. Use the dashboard `07_Display AWS DevOps Agent investigation
+    results` to see the investigation results.'
+  tasks:
+    attach_investigation:
+      name: attach_investigation
+      input:
+        script: "import {\n  eventsClient,\n  problemsClient,\n  EventIngestEventType,\n\
+          } from \"@dynatrace-sdk/client-classic-environment-v2\";\nimport { execution\
+          \ } from \"@dynatrace-sdk/automation-utils\";\nimport { documentsClient\
+          \ } from \"@dynatrace-sdk/client-document\";\n\nfunction type2typeStr(type)\
+          \ {\n  if (type == \"cause\") {\n    return \"Cause\";\n  } else if (type\
+          \ == \"root_cause\") {\n    return \"Root Cause\";\n  } else if (type ==\
+          \ \"hypothesis\") {\n    return \"Hypothesis\";\n  } else {\n    return\
+          \ \"\";\n  }\n}\n\nfunction trimIfTooLong(val) {\n  if (val.length > 4000)\
+          \ {\n    return val.substring(0, 4000) + \"... trimmed please use AWS DevOps\
+          \ App\"\n  }\n  return val\n}\n\nfunction createTSGNodebookId(problemId,\
+          \ taskId) {\n  return `problem-TSG-${problemId}-${taskId.substring(0, 10)}`.substring(0,\
+          \ 100).replaceAll(\"_\", \"-\");\n}\n\nfunction observations2Str(obs) {\n\
+          \  if (obs && obs.length > 0) {\n    return obs.reduce(\n      (acc, cur)\
+          \ => (acc += `\\n- **${cur.title}:** ${cur.analysis}`),\n      \"##### Observations:\"\
+          \n    );\n  }\n  return \"\";\n}\n\nfunction generateGUID() {\n  return\
+          \ \"xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx\".replace(/[xy]/g, function (c)\
+          \ {\n    const r = (Math.random() * 16) | 0,\n      v = c === \"x\" ? r\
+          \ : (r & 0x3) | 0x8;\n    return v.toString(16);\n  });\n}\n\nexport default\
+          \ async function ({ executionId }) {\n  const ex = await execution(executionId);\n\
+          \  const eventPayload = ex.params?.event;\n\n  const nowInUTC = Date.now();\n\
+          \  const { journalRecord, task, problemEventId } = eventPayload;\n  const\
+          \ journalRecordAsObj = JSON.parse(journalRecord);\n  const taskAsObj = JSON.parse(task);\n\
+          \  const recordType = journalRecordAsObj.record_type;\n  const contentObj\
+          \ = JSON.parse(journalRecordAsObj.content);\n\n  console.log(\n    `Received\
+          \ AWS DevOps Agent investigation results for Dynatrace Problem ${problemEventId}`\n\
+          \  );\n  const { symptoms, findings, investigation_gaps } = contentObj;\n\
+          \n  if (recordType == \"investigation_summary\") {\n    let description\
+          \ = \"\";\n    let symptomsText;\n    let findingsText;\n    let investigationGapsText;\n\
+          \n    if (symptoms && symptoms.length > 0) {\n      symptomsText = symptoms.reduce(\n\
+          \        (acc, cur) => (acc += `#### ${cur.title}\\n${cur.description}\\\
+          n`),\n        \"\"\n      );\n    }\n\n    if (findings && findings.length\
+          \ > 0) {\n      findingsText = findings.reduce(\n        (acc, cur) =>\n\
+          \          (acc += `#### ${cur.title} (${type2typeStr(cur.type)})\\n${cur.description}\\\
+          n${observations2Str(cur.observations)}\\n`),\n        \"\"\n      );\n \
+          \   }\n\n    if (investigation_gaps && investigation_gaps.length > 0) {\n\
+          \      investigationGapsText =\n        \"\\n\" +\n        investigation_gaps.reduce(\n\
+          \          (acc, cur) => (acc += `#### ${cur.title}\\n${cur.description}\\\
+          n`),\n          \"\"\n        );\n    }\n\n    const agentSpace =\n    \
+          \  taskAsObj.agent_space_arn.match(/agentspace\\/([\\w-]+)/)?.[1];\n\n \
+          \   if (ex?.input?.createTSGNotebooks) {\n      try {\n        const notebookContent\
+          \ = {\n          defaultTimeframe: { from: \"now()-2h\", to: \"now()\" },\n\
+          \          defaultSegments: [],\n          sections: [\n            {\n\
+          \              id: \"19ebed94-69a9-4a6e-b392-7bb7b0deb330\",\n         \
+          \     type: \"markdown\",\n              markdown: `# AWS DevOps Agent investigation\
+          \ response\\n (Dynatrace Problem ${problemEventId}/ AWS DevOps Agent Task\
+          \ id ${taskAsObj?.task_id})`,\n            },\n            {\n         \
+          \     id: \"19ebed94-69a9-4a6e-b392-7bb7b0deb331\",\n              type:\
+          \ \"markdown\",\n              markdown: \"## Symptoms\\n\" + (symptomsText\
+          \ ? symptomsText : \"`-`\"),\n            },\n            {\n          \
+          \    id: \"19ebed94-69a9-4a6e-b392-7bb7b0deb332\",\n              type:\
+          \ \"markdown\",\n              markdown: \"## Findings\\n\" + (findingsText\
+          \ ? findingsText : \"`-`\"),\n            },\n            {\n          \
+          \    id: \"19ebed94-69a9-4a6e-b392-7bb7b0deb333\",\n              type:\
+          \ \"markdown\",\n              markdown:\n                \"## Observation\
+          \ Gaps\\n\" +\n                (investigationGapsText ? investigationGapsText\
+          \ : \"`-`\"),\n            },\n          ],\n        };\n\n        const\
+          \ generatedNotebook = await documentsClient.createDocument({\n         \
+          \ body: {\n            name: `[AI] AWS DevOps Agent results (${problemEventId}/\
+          \ ${taskAsObj?.task_id})`,\n            type: 'notebook',\n            description:\n\
+          \              `A notebook containing the results from AWS DevOps Agent\
+          \ for Problem ${problemEventId}`,\n            id: createTSGNodebookId(problemEventId,\
+          \ taskAsObj.task_id),\n            content: new Blob([JSON.stringify(notebookContent)],\
+          \ {\n              type: 'application/json',\n            }),\n        \
+          \  },\n        });\n\n        const updated = await documentsClient.updateDocument({\n\
+          \          id: generatedNotebook.id,\n          optimisticLockingVersion:\
+          \ generatedNotebook.version,\n          body: {\n            isPrivate:\
+          \ false,\n          },\n        });\n        console.log(`created TSG notebook\
+          \ ${generatedNotebook.id}`)\n      } catch (e) {\n        console.log(`Warning,\
+          \ cannot create or attach TSG notebook ${e}`);\n      }\n    }\n\n    try\
+          \ {\n      const ret = await eventsClient.createEvent({\n        body: {\n\
+          \          eventType: \"CUSTOM_ANNOTATION\",\n          title: \"AWS DevOps\
+          \ Agent investigation result - \" + taskAsObj.title,\n          startTime:\
+          \ nowInUTC,\n          endTime: nowInUTC,\n          properties: {\n   \
+          \         \"dt.event.description\": `AWS DevOps Agent provided input\\nSource:\
+          \ [Link to investigation](https://app.aidevops.aws.com/${agentSpace}/investigation/${taskAsObj.task_id})`,\n\
+          \            \"aws_devopsagent.response_type\": \"investigation_summary\"\
+          ,\n            \"aws_devopsagent.agent_space_arn\": taskAsObj?.agent_space_arn,\n\
+          \            \"aws_devopsagent.task_id\": taskAsObj?.task_id,\n        \
+          \    \"aws_devopsagent.version\": taskAsObj?.version,\n            symptoms:\
+          \ trimIfTooLong(symptomsText ? symptomsText : '`-`'),\n            findings:\
+          \ trimIfTooLong(findingsText ? findingsText : '`-`'),\n            investigationGaps:\
+          \ trimIfTooLong(investigationGapsText\n              ? investigationGapsText\n\
+          \              : '`-`'),\n            \"problem.id\": problemEventId,\n\
+          \            author: \"aws_devopsagent\",\n          },\n        },\n  \
+          \    })\n      \n      console.log(\n        `Successfully added AWS DevOps\
+          \ Agent investigation results to Dynatrace Problem ${problemEventId}`\n\
+          \      );\n      \n      return {\n        success: true,\n        description:\
+          \ `Appended Custom Annotation to problem ${problemEventId}:\\n${JSON.stringify(\n\
+          \          description\n        )}`,\n        createTSGNotebooks: ex?.input?.createTSGNotebooks\
+          \ || false,\n      };\n    } catch (e) {\n      console.log(e);\n    }\n\
+          \  }\n\n  return {\n    success: false,\n    description: `Did not understand\
+          \ input\\n${JSON.stringify(eventPayload)}`,\n  };\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 1
+      description: Attach investigation to Dynatrace Problem
+      predecessors: []

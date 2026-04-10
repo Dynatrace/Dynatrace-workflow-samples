@@ -15,9 +15,52 @@ If you're using GitHub Copilot, Cursor, Claude Code, Kiro, or other AI coding as
 - Workflow syntax and structure for all three formats (YAML templates, API JSON, Terraform)
 - Common workflow actions and patterns
 - Template expressions (Jinja2)
+- **dtctl** — Dynatrace CLI for workflow validation, deployment, and execution
 - Pull request review guidelines
 - Best practices and troubleshooting
 - Complete examples
+
+## Validating Workflows with dtctl
+
+[`dtctl`](https://github.com/dynatrace-oss/dtctl) is the official kubectl-style Dynatrace CLI. Use it to validate and deploy workflows:
+
+```bash
+# Install
+brew install dynatrace-oss/tap/dtctl
+
+# Authenticate
+dtctl auth login --context my-env --environment "https://<env-id>.apps.dynatrace.com"
+
+# Validate a workflow template (dry-run — no deployment)
+dtctl apply -f my-workflow.yaml --dry-run --plain
+
+# Deploy
+dtctl apply -f my-workflow.yaml --plain
+```
+
+See [AGENTS.md](AGENTS.md#dtctl--dynatrace-cli-for-workflow-management) for the full dtctl reference.
+
+## Repository Structure
+
+### [`in-product-templates/`](in-product-templates/) — In-Product Template Reference
+
+> **⚠️ These templates are NOT meant to be used from this repository.** They are available directly inside the Dynatrace product as built-in workflow templates. They are maintained here **solely as a reference knowledge base for AI agents** generating new workflows.
+
+31 categorized in-product workflow templates covering:
+
+| Category | Templates | Highlights |
+|----------|-----------|------------|
+| [Dynatrace Intelligence Agents](in-product-templates/dynatrace-intelligence-agents/) | 9 | AI-powered automation using `davis-copilot` |
+| [AWS DevOps Agent](in-product-templates/aws-devops-agent/) | 6 | Multi-workflow orchestration pipeline |
+| [Incident Management](in-product-templates/incident-management/) | 6 | ServiceNow, PagerDuty, ownership routing |
+| [Notifications & Reporting](in-product-templates/notifications-and-reporting/) | 3 | Microsoft Teams, email summaries |
+| [Remediation](in-product-templates/remediation/) | 2 | Red Hat Ansible (EDA + job templates) |
+| [DevOps Automation](in-product-templates/devops-automation/) | 4 | K8s ops, GitOps, config management |
+| [Security](in-product-templates/security/) | 1 | Threat intelligence data templates |
+
+### [`samples/`](samples/) — Community Workflow Samples
+
+Community-contributed workflow samples and code snippets for direct use.
 
 ## How to leverage workflow and code samples
 

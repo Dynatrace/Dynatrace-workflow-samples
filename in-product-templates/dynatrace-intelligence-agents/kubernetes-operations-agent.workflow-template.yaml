@@ -1,0 +1,142 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.jira
+      version: ^5.7.2
+  inputs:
+  - type: connection
+    schema: app:dynatrace.jira:connection
+    targets:
+    - tasks.create_jira_issue.connectionId
+    - tasks.search_jira_issue.connectionId
+workflow:
+  title: Kubernetes Operations Agent
+  description: ''
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input:
+    k8s.object: 'DEMO: Generate an exemplary K8s workload definiton as JSON'
+    occurences: 0
+    object.type: KUBERNETES_DEPLOYMENT
+    finding.title: Apply Security Context to Your Pods and Containers
+    compliance.control: DEMO
+  hourlyExecutionLimit: 10
+  guide: "# K8s Workload Misconfiguration Agent\n\nGet tangible assistence to fix\
+    \ misconfigured K8s workloads. This workflow automatically analyzes all workload\
+    \ misconfigurations, generates YAML-code to fix the insecure configuration, and\
+    \ pushes the suggestion to Jira for tracking.\n\n# Prerequisites\n\n* [Kubernetes\
+    \ Security Posture Management](https://docs.dynatrace.com/docs/shortlink/guides-spm)\
+    \ is set up and enabled for your Kubernetes clusters\n* This workflow should be\
+    \ triggered as a sub-workflow with a set of inputs input that represent K8s worfklow\
+    \ misconfigurations. \n\n# How to Setup\n\n1. During the template deployment select\
+    \ an existing Jira connection or create a new one.\n2. After the workflow deployment,\
+    \ configure the following parameters in the [`create_jira_issue`](?task=create_jira_issue&tab=input)\
+    \ task:\n* Project - your Jira project name (for example, `Security Project`).\n\
+    * Issue type - you Jira issue type name (for example, `Security Issue`).\n* Assignee\
+    \ - select a user from a drop-down or specify a user Jira ID (for example: `777020:aaffffeb-6666-4444-8c8c-9f79f7c2bc2b`).\n\
+    * Reporter - select a user from a drop-down or specify a user Jira ID (for example:\
+    \ `777020:aaffffeb-6666-4444-8c8c-9f79f7c2bc2b`).\n* (optional) Labels - comma-separated\
+    \ list of labels to be applied on the created Jira ticket.\n3. Enable the workflow\
+    \ trigger.\n\n# Workflow flow\n\n1. The workflow check if there already is an\
+    \ open Jira ticket for the particular incident.\n2. Based on a current workflow\
+    \ definition, YAML code is generated to fix the insecure configuration.\n3. The\
+    \ resulting suggestion is reported to Jira for tracking."
+  tasks:
+    create_jira_issue:
+      name: create_jira_issue
+      input:
+        labels:
+        - Security
+        - Workflow
+        project:
+          id: '20638'
+        summary: Security misconfiguration {{ input()["compliance.control"] }} affecting
+          {{ input()["object.type"] }} ({{ input()["occurences"] }} occurences)
+        assignee:
+          id: 712020:7e8772f7-80e9-49b6-8035-f37023d25878
+        priority:
+          id: '10500'
+        reporter:
+          id: 712020:7e8772f7-80e9-49b6-8035-f37023d25878
+        issueType:
+          id: '38'
+        components: []
+        description: '{{ result("generate_yaml_fix")["text"] }}
+
+
+          h2. Details
+
+
+          [Open findings in Dynatrace|{{ environment().url + "/ui/apps/dynatrace.security.posturemanagement/findings?perspective=Default&sort=compliance.rule.severity.level%3Adescending#filtering=Control+%3D+"
+          + input()["compliance.control"] + "+\"Resource+type\"+%3D+" + input()["object.type"]
+          + "+" }}]'
+        connectionId: ''
+        fieldSetters: []
+      action: dynatrace.jira:jira-create-issue
+      active: true
+      position:
+        x: 0
+        y: 3
+      conditions:
+        custom: ''
+        states:
+          generate_yaml_fix: OK
+      description: Create new Jira issue with various fields
+      predecessors:
+      - generate_yaml_fix
+    generate_yaml_fix:
+      name: generate_yaml_fix
+      input:
+        config: dynatrace
+        prompt: 'Generate a fix the misconfiguration "{{ input()["finding.title"]
+          }}" on {{ input()["object.type"] }}
+
+          '
+        autoTrim: true
+        instruction: "Based on the current definition in JSON, provide a diff, showing\
+          \ what needs to be changed to fix the issue.\nProvide the diff in YAML instead\
+          \ of JSON. Use YAML comments for any additional text in the code snippet.\n\
+          \n## General guidance\n* Only output the content for the Jira issue, without\
+          \ any additional explanations.\n* Prepare a Jira ticket content suitable\
+          \ for an API call that would summarize the findings. \n* Follow the h2.\
+          \ / h3. / h4. for marking headers in the output ready for Jira API.\n* Do\
+          \ not include in the output unnecessary strings, such as ```markdown or\
+          \ ``` and make sure to format code blocks as {code:yaml}...{code}."
+        supplementary: 'Current workload definition (JSON): {{ input()["k8s.object"]
+          }}'
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      active: true
+      position:
+        x: 0
+        y: 2
+      conditions:
+        custom: '{{ not result("search_jira_issue") }}'
+        states:
+          search_jira_issue: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - search_jira_issue
+    search_jira_issue:
+      name: search_jira_issue
+      input:
+        jql: summary ~ "Security misconfiguration {{ input()["compliance.control"]
+          }} affecting {{ input()["object.type"] }} ({{ input()["occurences"] }} occurences)"
+          AND statusCategory != Done
+        expand: []
+        fields:
+        - id
+        - key
+        connectionId: ''
+      action: dynatrace.jira:jira-jql-search
+      position:
+        x: 0
+        y: 1
+      conditions:
+        states: {}
+      description: Execute JQL queries to fetch issues from Jira
+      predecessors: []

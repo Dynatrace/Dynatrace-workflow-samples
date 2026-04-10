@@ -1,0 +1,483 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.github.connector
+      version: ^2.8.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.github.connector:connection
+    targets:
+    - tasks.create_pull_request_1.connectionId
+workflow:
+  title: Kubernetes Troubleshooting Agent
+  description: ''
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-event
+        value:
+          entityTags: {}
+          customFilter: 'event.status_transition == "CREATED" AND
+
+            event.provider == "KUBERNETES_ANOMALY_DETECTION" AND
+
+            dt.openpipeline.source != "classic_rest_api"'
+          onProblemClose: false
+          entityTagsMatch: null
+          maintenanceWindowTriggerBehavior: always
+  result: null
+  type: STANDARD
+  input:
+    actions:
+      generatePullRequest: false
+      generateRecommendation: true
+  hourlyExecutionLimit: 10
+  guide: "# Kubernetes Troubleshooting Agent\nThis workflow integrates agentic AI\
+    \ into your Kubernetes environment, providing instant diagnostics directly within\
+    \ the Problems app.\n\n# How to Set Up\nDeploy this workflow, and it will automatically\
+    \ trigger a diagnostic process for every new K8s issue. The results will be available\
+    \ in the Problems app within minutes, giving you actionable insights effortlessly.\n\
+    \n## Configuration\n\nWhen importing the workflow, you can configure two variables:\n\
+    \n1. **`generateRecommendation`**:  \n   - **Default**: `true`  \n   - When set\
+    \ to `true`, the workflow automatically enriches any Kubernetes problem with the\
+    \ output from the agent.\n\n2. **`generatePullRequest`**:  \n   - **Default**:\
+    \ `false`  \n   - When set to `true`, the workflow extracts the YAML from the\
+    \ agent's suggestions and creates a pull request with the changes.  \n   - **Note**:\
+    \ To enable this functionality, the `create_pull_request_1` step must be properly\
+    \ configured with your Git repository."
+  tasks:
+    create_event:
+      name: create_event
+      input:
+        script: "// optional import of sdk modules\nimport { execution } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from \"@dynatrace-sdk/client-classic-environment-v2\"\
+          ;\n\nexport default async function () {\n  // your code goes here\n  //\
+          \ e.g. get the current execution\n  const ex = await execution();\n  const\
+          \ input = ex.input\n  const event = await ex.result(\"js_format_properties\"\
+          );\n  console.log(\"Event: \" + event);\n  const data = await eventsClient.createEvent({\n\
+          \  body: event,\n});\n  console.log(data);\n  if (data.eventIngestResults[0].status\
+          \ !== \"OK\") {\n    throw new Error(\"Event ingest failed! See logs!\"\
+          );\n  }\n  return data;\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 5
+      conditions:
+        states:
+          js_format_properties: OK
+      description: Run custom JavaScript code.
+      predecessors:
+      - js_format_properties
+    dql_cpu_metric:
+      name: dql_cpu_metric
+      input:
+        query: "timeseries result = sum(dt.kubernetes.container.cpu_usage, default:\
+          \ 0, rollup: sum, rate: 1m), nonempty: true, by:{ {{event()[\"affected_entity_types\"\
+          ][0]}} }, filter:  {{event()[\"affected_entity_types\"][0]}}  == \"{{event()[\"\
+          affected_entity_ids\"][0] }}\", interval:1h | fieldsAdd metricName = \"\
+          Kubernetes: Container - CPU usage\"\n| append[timeseries result = sum(dt.kubernetes.container.cpu_throttled,\
+          \ default: 0, rollup: sum, rate: 1m), nonempty: true, by:{dt.entity.cloud_application},\
+          \ filter:  {{event()[\"affected_entity_types\"][0]}} == \"{{event()[\"affected_entity_ids\"\
+          ][0] }}\", interval:1h | fieldsAdd metricName = \"Kubernetes: Container\
+          \ - CPU throttled\"]\n| append[timeseries result = sum(dt.kubernetes.container.requests_cpu,\
+          \ rollup: sum, rate: 1m), by:{ {{event()[\"affected_entity_types\"][0]}}\
+          \ }, filter: dt.entity.cloud_application == \"{{event()[\"affected_entity_ids\"\
+          ][0] }}\", interval:1h| fieldsAdd metricName = \"CPU requests\"]\n| append[timeseries\
+          \ result = sum(dt.kubernetes.container.limits_cpu, rollup: sum, rate: 1m),\
+          \ by:{ {{event()[\"affected_entity_types\"][0]}} }, filter: {{event()[\"\
+          affected_entity_types\"][0]}} == \"{{event()[\"affected_entity_ids\"][0]\
+          \ }}\", interval:1h | fieldsAdd metricName = \"CPU limits\"]\n| append[timeseries\
+          \ {\n  subSeries = sum(dt.kubernetes.container.cpu_usage, rollup:sum, rate:1m),\n\
+          \  totalSeries = sum(dt.kubernetes.node.cpu_allocatable, rollup:sum, rate:1m)\n\
+          }, by:{ {{event()[\"affected_entity_types\"][0]}} }, filter: {{event()[\"\
+          affected_entity_types\"][0]}} == \"{{event()[\"affected_entity_ids\"][0]\
+          \ }}\" | fieldsAdd result = (subSeries[] / totalSeries[]) * 100\n| fieldsRemove\
+          \ subSeries, totalSeries | fieldsAdd metricName = \"Kubernetes: Container\
+          \ - CPU usage %\"]\n| append[timeseries {\n  subSeries = sum(dt.kubernetes.container.requests_cpu,\
+          \ rollup:sum, rate:1m),\n  totalSeries = sum(dt.kubernetes.node.cpu_allocatable,\
+          \ rollup:sum, rate:1m)\n}, by:{ {{event()[\"affected_entity_types\"][0]}}\
+          \ }, filter: {{event()[\"affected_entity_types\"][0]}} == \"{{event()[\"\
+          affected_entity_ids\"][0] }}\" | fieldsAdd result = (subSeries[] / totalSeries[])\
+          \ * 100\n| fieldsRemove subSeries, totalSeries | fieldsAdd metricName =\
+          \ \"Kubernetes: Container - CPU requests %\"]\n| append[timeseries {\n \
+          \ subSeries = sum(dt.kubernetes.container.limits_cpu, rollup:sum, rate:1m),\n\
+          \  totalSeries = sum(dt.kubernetes.node.cpu_allocatable, rollup:sum, rate:1m)\n\
+          }, by:{ {{event()[\"affected_entity_types\"][0]}} }, filter:  {{event()[\"\
+          affected_entity_types\"][0]}}  == \"{{event()[\"affected_entity_ids\"][0]\
+          \ }}\" | fieldsAdd result = (subSeries[] / totalSeries[]) * 100\n| fieldsRemove\
+          \ subSeries, totalSeries | fieldsAdd metricName = \"Kubernetes: Container\
+          \ - CPU limits %\"]"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -2
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    js_extract_yaml:
+      name: js_extract_yaml
+      input:
+        script: "import { execution } from \"@dynatrace-sdk/automation-utils\";\n\n\
+          export default async function ({ executionId }) {\n  const exe = await execution(executionId);\n\
+          \  const davis_prompt_result = await exe.result(\"prompt_davis_copilot\"\
+          );\n\n  const text: string = davis_prompt_result?.text ?? \"\";\n\n  const\
+          \ extractYamlBlock = (input: string): string | null => {\n    // 1) Prefer\
+          \ explicitly labeled YAML fences\n    const m1 = input.match(/```(?:yaml|yml)\\\
+          s*([\\s\\S]*?)\\s*```/i);\n    if (m1?.[1]?.trim()) return m1[1].trim();\n\
+          \n    // 2) Fallback: first fenced code block of any language\n    const\
+          \ m2 = input.match(/```[a-zA-Z0-9_-]*\\s*([\\s\\S]*?)\\s*```/);\n    if\
+          \ (m2?.[1]?.trim()) return m2[1].trim();\n\n    return null;\n  };\n\n \
+          \ const yamlText = extractYamlBlock(text);\n\n  return {\n    yamlFound:\
+          \ Boolean(yamlText),\n    yamlText: yamlText, // null if not found\n  };\n\
+          }\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 1
+        y: 4
+      conditions:
+        custom: ''
+        states:
+          prompt_davis_copilot: OK
+      description: Run custom JavaScript code.
+      predecessors:
+      - prompt_davis_copilot
+    dql_memory_metrics:
+      name: dql_memory_metrics
+      input:
+        query: "timeseries result = sum(dt.kubernetes.container.memory_working_set,\
+          \ default: 0, rollup: sum, rate: 1m), nonempty: true, by:{ {{event()[\"\
+          affected_entity_types\"][0]}} }, filter: {{event()[\"affected_entity_types\"\
+          ][0]}} == \"{{event()[\"affected_entity_ids\"][0] }}\", interval:1h | fieldsAdd\
+          \ metricName = \"Kubernetes: Container - working set memory\"\n| append[timeseries\
+          \ result = sum(dt.kubernetes.container.requests_memory, rollup: sum, rate:\
+          \ 1m), filter:  {{event()[\"affected_entity_types\"][0]}}  == \"{{event()[\"\
+          affected_entity_ids\"][0] }}\", interval:1h| fieldsAdd metricName = \"Kubernetes:\
+          \ Container - request memory\"]\n| append[timeseries result = sum(dt.kubernetes.container.limits_memory,\
+          \ rollup: sum, rate: 1m), by:{ {{event()[\"affected_entity_types\"][0]}}\
+          \ }, filter: {{event()[\"affected_entity_types\"][0]}} == \"{{event()[\"\
+          affected_entity_ids\"][0] }}\", interval:1h| fieldsAdd metricName = \"Kubernetes:\
+          \ Container - limits memory\"]\n| append[timeseries result = sum(dt.kubernetes.node.memory_allocatable,\
+          \ rollup: sum, rate: 1m), by:{ {{event()[\"affected_entity_types\"][0]}}\
+          \ }, filter: {{event()[\"affected_entity_types\"][0]}} == \"{{event()[\"\
+          affected_entity_ids\"][0] }}\", interval:1h | fieldsAdd metricName = \"\
+          Kubernetes: Node - memory allocatable\"]\n| append[timeseries {\n  subSeries\
+          \ = sum(dt.kubernetes.container.memory_working_set, rollup:sum, rate:1m),\n\
+          \  totalSeries = sum(dt.kubernetes.node.memory_allocatable, rollup:sum,\
+          \ rate:1m)\n}, by:{ {{event()[\"affected_entity_types\"][0]}} }, filter:\
+          \  {{event()[\"affected_entity_types\"][0]}}  == \"{{event()[\"affected_entity_ids\"\
+          ][0] }}\" | fieldsAdd result = (subSeries[] / totalSeries[]) * 100\n| fieldsRemove\
+          \ subSeries, totalSeries | fieldsAdd metricName = \"Kubernetes: Container\
+          \ - working set memory %\"]\n| append[timeseries {\n  subSeries = sum(dt.kubernetes.container.requests_memory,\
+          \ rollup:sum, rate:1m),\n  totalSeries = sum(dt.kubernetes.node.memory_allocatable,\
+          \ rollup:sum, rate:1m)\n}, by:{ {{event()[\"affected_entity_types\"][0]}}\
+          \ }, filter:  {{event()[\"affected_entity_types\"][0]}}  == \"{{event()[\"\
+          affected_entity_ids\"][0] }}\" | fieldsAdd result = (subSeries[] / totalSeries[])\
+          \ * 100\n| fieldsRemove subSeries, totalSeries | fieldsAdd metricName =\
+          \ \"Kubernetes: Container - memory requests %\"]\n| append[timeseries {\n\
+          \  subSeries = sum(dt.kubernetes.container.limits_memory, rollup:sum, rate:1m),\n\
+          \  totalSeries = sum(dt.kubernetes.node.memory_allocatable, rollup:sum,\
+          \ rate:1m)\n}, by:{ {{event()[\"affected_entity_types\"][0]}} }, filter:\
+          \  {{event()[\"affected_entity_types\"][0]}}  == \"{{event()[\"affected_entity_ids\"\
+          ][0] }}\" | fieldsAdd result = (subSeries[] / totalSeries[]) * 100\n| fieldsRemove\
+          \ subSeries, totalSeries | fieldsAdd metricName = \"Kubernetes: Container\
+          \ - memory limits %\"]"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    dql_query_get_logs:
+      name: dql_query_get_logs
+      input:
+        query: "fetch logs, from: now()-10min\n| filter {% if \"k8s.cluster.name\"\
+          \ in event() %}k8s.cluster.name == \"{{ event()['k8s.cluster.name'] }}\"\
+          {% else %}true == true{% endif %}\n| filter {% if \"k8s.node.name\" in event()\
+          \ %}k8s.node.name == \"{{ event()['k8s.node.name'] }}\"{% else %}true ==\
+          \ true{% endif %}\n| filter {% if \"k8s.namespace.name\" in event() %}k8s.namespace.name\
+          \ == \"{{ event()['k8s.namespace.name'] }}\"{% else %}true == true{% endif\
+          \ %}\n| filter {% if \"k8s.workload.name\" in event() %}k8s.workload.name\
+          \ == \"{{ event()['k8s.workload.name'] }}\"{% else %}true == true{% endif\
+          \ %}\n| filter contains(lower(content), \"error\") OR contains(lower(content),\
+          \ \"exception\") OR loglevel == \"ERROR\" OR loglevel == \"WARN\" OR loglevel\
+          \ == \"EMERGENCY\"\n| fields timestamp, content \n| limit 10"
+        timezone: Europe/Berlin
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    dql_related_events:
+      name: dql_related_events
+      input:
+        query: "fetch events, from: now()-90min\n  | filter dt.system.bucket == \"\
+          default_davis_custom_events\" or dt.system.bucket == \"default_davis_events\"\
+          \ or dt.system.bucket == \"default_davis_k8s_ops_events\"\n  | filter event.kind\
+          \ == \"DAVIS_EVENT\"\n  | filter event.provider == \"KUBERNETES_EVENT\"\
+          \ or \n    (event.provider == \"KUBERNETES_INFERRED_EVENT\" and event.group_label\
+          \ != \"Workload spec change\")\n  | filter {% if \"k8s.cluster.name\" in\
+          \ event() %}k8s.cluster.name == \"{{ event()['k8s.cluster.name'] }}\"{%\
+          \ else %}true == true{% endif %}\n  \n  | filter {% if \"k8s.node.name\"\
+          \ in event() %}k8s.node.name == \"{{ event()['k8s.node.name'] }}\"{% else\
+          \ %}true == true{% endif %}\n  \n  | filter {% if \"k8s.namespace.name\"\
+          \ in event() %}k8s.namespace.name == \"{{ event()['k8s.namespace.name']\
+          \ }}\"{% else %}true == true{% endif %}\n  \n  | filter {% if \"k8s.workload.name\"\
+          \ in event() %}k8s.workload.name == \"{{ event()['k8s.workload.name'] }}\"\
+          {% else %}true == true{% endif %}\n  \n  | sort event.start desc \n  | summarize\
+          \ {\n    first_seen = takeLast(event.start),\n    occurrence = count()\n\
+          \  }, by: {event.category, dt.kubernetes.event.message, dt.kubernetes.event.reason,\
+          \ k8s.cluster.name, k8s.node.name, k8s.namespace.name, k8s.workload.name}\n\
+          \  | fields first_seen, occurrence, type=event.category, reason=dt.kubernetes.event.reason,\
+          \ message=dt.kubernetes.event.message, k8s.cluster.name, k8s.node.name,\
+          \ k8s.namespace.name, k8s.workload.name\n"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    dql_problem_metrics:
+      name: dql_problem_metrics
+      input:
+        query: '{{ event()["dt.query"] }}'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -3
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    js_format_properties:
+      name: js_format_properties
+      input:
+        script: "\nimport { execution } from \"@dynatrace-sdk/automation-utils\";\n\
+          import { eventsClient, EventIngestEventType } from \"@dynatrace-sdk/client-classic-environment-v2\"\
+          ;\n\nexport default async function ({ executionId }) {\n  const exe = await\
+          \ execution(executionId);\n  const davis_prompt_result = await exe.result(\"\
+          prompt_davis_copilot\");\n  const event = exe.params.event;\n\n  const getFirstValue\
+          \ = (key: string) => {\n    const value = event[key];\n    return Array.isArray(value)\
+          \ ? value.find(v => v != null) : value;\n  };\n\n  const cloudAppId = getFirstValue(\"\
+          affected_entity_ids\");\n  const event_id = getFirstValue(\"event.id\");\n\
+          \  const event_type = getFirstValue(\"event.type\");\n  const event_start_time\
+          \ = new Date(getFirstValue(\"event.start\"));\n\n  let davisPrompt = davis_prompt_result.text;\n\
+          \  if (davisPrompt.length > 4096) {\n    davisPrompt = davisPrompt.slice(0,\
+          \ 4096);\n  }\n\n  return {\n  title: \"✨ Dynatrace Intelligence\",\n  eventType:\
+          \ event_type || \"AVAILABILITY_EVENT\",\n  entitySelector: 'entityId(\"\
+          ' + getFirstValue(\"dt.source_entity\") + '\")',\n  startTime: event_start_time.getTime(),\n\
+          \  properties: {\n    \"event.category\": getFirstValue(\"event.category\"\
+          ),\n    \"event.kind\": getFirstValue(\"event.kind\"),\n    \"event.name\"\
+          : \"✨ Dynatrace Intelligence for K8s\",\n    \"event.description\": davisPrompt,\n\
+          \    \"dt.event.allow_davis_merge\": true,\n    \"dt.event.is_rootcause_relevant\"\
+          : true,\n    \"k8s.namespace.name\": getFirstValue(\"k8s.namespace.name\"\
+          ),\n    \"k8s.cluster.name\": getFirstValue(\"k8s.cluster.name\"),\n   \
+          \ \"k8s.node.name\": getFirstValue(\"k8s.node.name\"),\n    \"k8s.cluster.uid\"\
+          : getFirstValue(\"k8s.cluster.uid\"),\n    \"k8s.workload.name\": getFirstValue(\"\
+          k8s.workload.name\"),\n    \"k8s.workload.kind\": getFirstValue(\"k8s.workload.kind\"\
+          ),\n    \"dt.source_entity\": getFirstValue(\"dt.source_entity\"),\n   \
+          \ \"dt.source_entity.type\": getFirstValue(\"dt.source_entity.type\"),\n\
+          \    \"source\": getFirstValue(\"source\"),\n    \"event.provider\": getFirstValue(\"\
+          event.provider\")\n  }\n};\n\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 4
+      conditions:
+        custom: '{{ input()["actions"]["generateRecommendation"] }}'
+        states:
+          prompt_davis_copilot: OK
+      description: Run custom JavaScript code.
+      predecessors:
+      - prompt_davis_copilot
+    prompt_davis_copilot:
+      name: prompt_davis_copilot
+      input:
+        config: dynatrace
+        prompt: "Dynatrace has detected the following Kubernetes issue. Please help\
+          \ me troubleshooting it.\nProblem Description: {{ event()[\"event.description\"\
+          ]}}  \nTimestamp: {{event()[\"timestamp\"]}}\n\nConsider the issue only\
+          \ as the trigger and look at all additional context provided to figure out\
+          \ the actuall problem and root-cause.\n\nRelated events of the same workload,\
+          \ related metrics, workload yaml files, change_details and logs are found\
+          \ in the context/supplementary.\n\nI want to know the underlying root-cause\
+          \ based on the logs, related events, workload details and yaml file. Call\
+          \ out the specific anomalies/misconfigurations/failure patterns. Explain\
+          \ the root-cause in a simple sentence, followed by supporting findings.\
+          \ Mention which side effects are triggered because of this and why. Also\
+          \ mention what things you checked, but didn't contain any related error\
+          \ signals.\n\nI also want to know a specific solution. If needed, show an\
+          \ updated yaml file that fixes the issue."
+        autoTrim: true
+        instruction: ''
+        supplementary: '# YAML definition
+
+          {{ result("dql_query_for_smartscape_yaml")["records"] if result("dql_query_for_smartscape_yaml")
+          is mapping and "records" in result("dql_query_for_smartscape_yaml") else
+          None }}
+
+
+          # Recent spec changes
+
+          {{ result("dql_query_spec_changes")["records"] if result("dql_query_spec_changes")
+          is mapping and "records" in result("dql_query_spec_changes") else None }}
+
+
+          # Related logs
+
+          {{ result("dql_query_get_logs")["records"] if result("dql_query_get_logs")
+          is mapping and "records" in result("dql_query_get_logs") else None }}
+
+
+          # Related Dynatrace problems
+
+          {{ result("dql_related_health_alerts")["records"] if result("dql_related_health_alerts")
+          is mapping and "records" in result("dql_related_health_alerts") else None
+          }}
+
+
+          # Summary of related kubernetes events:
+
+          {{ result("dql_related_events")["records"] if result("dql_related_events")
+          is mapping and "records" in result("dql_related_events") else None }}
+
+
+          # Related metrics
+
+          ## CPU
+
+          {{ result("dql_cpu_metric")["records"] | replace(" ", "") if result("dql_cpu_metric")
+          is mapping and "records" in result("dql_cpu_metric") else None }}
+
+          ## Memory
+
+          {{ result("dql_memory_metrics")["records"] | replace(" ", "") if result("dql_memory_metrics")
+          is mapping and "records" in result("dql_memory_metrics") else None }}
+
+          ## Metric related to triggering problem
+
+          {{ result("dql_problem_metrics")["records"] | replace(" ", "") if result("dql_problem_metrics")
+          is mapping and "records" in result("dql_problem_metrics") else None }}
+
+          '
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          dql_cpu_metric: OK
+          dql_memory_metrics: OK
+          dql_query_get_logs: OK
+          dql_related_events: ANY
+          dql_problem_metrics: ANY
+          dql_query_spec_changes: OK
+          dql_related_health_alerts: OK
+          dql_query_for_smartscape_yaml: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - dql_query_for_smartscape_yaml
+      - dql_query_get_logs
+      - dql_cpu_metric
+      - dql_memory_metrics
+      - dql_problem_metrics
+      - dql_related_events
+      - dql_related_health_alerts
+      - dql_query_spec_changes
+    create_pull_request_1:
+      name: create_pull_request_1
+      input:
+        owner: K8s troubleshooting agent
+        connectionId: ''
+      action: dynatrace.github.connector:create-pull-request
+      active: true
+      position:
+        x: 1
+        y: 5
+      conditions:
+        custom: '{{ input()["actions"]["generatePullRequest"] }}'
+        states:
+          js_extract_yaml: OK
+      description: Creates a pull request
+      predecessors:
+      - js_extract_yaml
+    dql_query_spec_changes:
+      name: dql_query_spec_changes
+      input:
+        query: "fetch events, from: now()-90min\n  | filter dt.system.bucket == \"\
+          default_davis_custom_events\" or dt.system.bucket == \"default_davis_events\"\
+          \ or dt.system.bucket == \"default_davis_k8s_ops_events\"\n  | filter event.kind\
+          \ == \"DAVIS_EVENT\"\n  | filter event.provider == \"KUBERNETES_INFERRED_EVENT\"\
+          \ and event.group_label == \"Workload spec change\"\n  | filter {% if \"\
+          k8s.cluster.name\" in event() %}k8s.cluster.name == \"{{ event()['k8s.cluster.name']\
+          \ }}\"{% else %}true == true{% endif %}\n  \n  | filter {% if \"k8s.node.name\"\
+          \ in event() %}k8s.node.name == \"{{ event()['k8s.node.name'] }}\"{% else\
+          \ %}true == true{% endif %}\n \n  | filter {% if \"k8s.namespace.name\"\
+          \ in event() %}k8s.namespace.name == \"{{ event()['k8s.namespace.name']\
+          \ }}\"{% else %}true == true{% endif %}\n \n  | filter {% if \"k8s.workload.name\"\
+          \ in event() %}k8s.workload.name == \"{{ event()['k8s.workload.name'] }}\"\
+          {% else %}true == true{% endif %}\n\n  | fields change_details, timestamp\n\
+          \    \n"
+        timezone: Europe/Berlin
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 2
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    dql_related_health_alerts:
+      name: dql_related_health_alerts
+      input:
+        query: "fetch events, from: now()-90min\n  | filter dt.system.bucket == \"\
+          default_davis_custom_events\" or dt.system.bucket == \"default_davis_events\"\
+          \ or dt.system.bucket == \"default_davis_k8s_ops_events\"\n  | filter event.kind\
+          \ == \"DAVIS_EVENT\"\n  | filter event.status_transition == \"CREATED\"\n\
+          \  | filter event.provider == \"KUBERNETES_ANOMALY_DETECTION\"\n  | filter\
+          \ {% if \"k8s.cluster.name\" in event() %}k8s.cluster.name == \"{{ event()['k8s.cluster.name']\
+          \ }}\"{% else %}true == true{% endif %}\n  \n  | filter {% if \"k8s.node.name\"\
+          \ in event() %}k8s.node.name == \"{{ event()['k8s.node.name'] }}\"{% else\
+          \ %}true == true{% endif %}\n  \n  | filter {% if \"k8s.namespace.name\"\
+          \ in event() %}k8s.namespace.name == \"{{ event()['k8s.namespace.name']\
+          \ }}\"{% else %}true == true{% endif %}\n  \n  | filter {% if \"k8s.workload.name\"\
+          \ in event() %}k8s.workload.name == \"{{ event()['k8s.workload.name'] }}\"\
+          {% else %}true == true{% endif %}\n  \n  | fields event.start, event.name,\
+          \ event.description\n  | sort event.start desc\n"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 3
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    dql_query_for_smartscape_yaml:
+      name: dql_query_for_smartscape_yaml
+      input:
+        query: 'smartscapeNodes "*", from: now()-30min
+
+          | filter id_classic == "{{event()["affected_entity_ids"][0]}}"
+
+          | fields k8s.object'
+        timezone: Europe/Berlin
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 4
+        y: 1
+      conditions:
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []

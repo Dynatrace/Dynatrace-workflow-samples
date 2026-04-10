@@ -1,0 +1,1464 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.email
+      version: ^1.9.0
+  inputs: []
+workflow:
+  title: Infrastructure Optimization Agent
+  description: This agent generates infrastructure optmization reports and emails
+    to the specified addresses.
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input:
+    scope:
+      disk: true
+      host: true
+      network: false
+      kubernetes: true
+    emails:
+      cc: []
+      to:
+      - me@email.com
+      bcc: []
+  hourlyExecutionLimit: 10
+  guide: '# Infrastructure Optimization Agent
+
+    Get recommendations on how to reduce cost and minimize risk by optimizing your
+    infrastructure. This agent queries Grail and provides data to Dynatrace Assist
+    to get recommendations. These recommendations are then sent to email(s) of your
+    choice.
+
+
+    # Setup
+
+    1. Goto the [Workflow Input](?options=) and scroll down to `Workflow input and
+    result`.
+
+    2. Change `scope` to include or exclude desired scope. Note: if you are not monitoring
+    some domains, e.g. `network`, please set to `false`.
+
+    3. Change emails (`to`, `cc`, `bcc`) to be an array of strings, e.g.:
+
+    ```
+
+    "to": [ "me@email.com", "you@email.com"]
+
+    ```
+
+    4. Test with a manual Run, by click the `Run` button.
+
+    5. If everything works as expected, change the [Trigger](?trigger=) to a schedule,
+    e.g. Weekly, Daily, etc.
+
+
+
+    # More advanced interactions
+
+    Consider using our MCP server, [local](https://github.com/dynatrace-oss/dynatrace-mcp)
+    or [remote](https://docs.dynatrace.com/docs/discover-dynatrace/platform/davis-ai/dynatrace-mcp
+    ).'
+  tasks:
+    k8s_cluster_cpu:
+      name: k8s_cluster_cpu
+      input:
+        query: "timeseries { \n  p95_cpu_allocatable = percentile(dt.kubernetes.node.cpu_allocatable,\
+          \ 95, rollup:sum, scalar: true),\n  p95_cpu_usage = percentile(dt.kubernetes.container.cpu_usage,\
+          \ 95, rollup:sum, scalar: true),\n  p95_cpu_limits = percentile(dt.kubernetes.container.limits_cpu,\
+          \ 95, rollup:sum, scalar: true),\n  p95_cpu_requests = percentile(dt.kubernetes.container.requests_cpu,\
+          \ 95, rollup:sum, scalar: true),\n  avg_node_count=avg(dt.kubernetes.nodes,\
+          \ scalar: true)\n}, by: { k8s.cluster.name, k8s.cluster.uid }, from: now()-7d,\
+          \ to:now()\n| lookup [\n  smartscapeNodes \"K8S_NODE\"\n  | parse k8s.object,\
+          \ \"JSON:k8s.object\"\n  | fieldsAdd node.labels = `tags:k8s.labels`\n \
+          \ | fields k8s.cluster.uid, instanceType=node.labels[`beta.kubernetes.io/instance-type`],\n\
+          \  cloudType=substring(k8s.object[spec][providerID], to: indexOf(k8s.object[spec][providerID],\
+          \ \":\"))\n], sourceField:k8s.cluster.uid, lookupField:k8s.cluster.uid,\
+          \ fields:{cloudType, instanceType}\n\n| fieldsAdd finding=coalesce(\n  \
+          \  if(p95_cpu_requests > 0.85 * p95_cpu_allocatable, \"SCALE_UP\"),\n  \
+          \  if(p95_cpu_requests < 0.4 * p95_cpu_allocatable and p95_cpu_requests\
+          \ / p95_cpu_allocatable > 0.8, \"MORE_SMALLER_NODES\"),\n    if(p95_cpu_requests\
+          \ < 0.4 * p95_cpu_allocatable, \"SCALE_DOWN\"),\n    \"NOMINAL\"\n  )\n\
+          | sort p95_cpu_allocatable desc\n| summarize by:{finding}, {count_clusters_with_finding=count(),\
+          \ total_nodes=sum(avg_node_count), total_mcores=sum(p95_cpu_allocatable),\
+          \ examples=collectArray(\n  record(\n    k8s.cluster.name, finding, avg_node_count=round(avg_node_count),\
+          \ p95_cpu_allocatable=round(p95_cpu_allocatable), \n    p95_cpu_usage=round(p95_cpu_usage),\
+          \ p95_cpu_limits=round(p95_cpu_limits), p95_cpu_requests=round(p95_cpu_requests),\n\
+          \    cloudType, instanceType )\n, maxLength:5)}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -2
+        y: 1
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["kubernetes"]}}'
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+      customSampleResult:
+        types:
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        finding:
+                          type: string
+                        cloudType:
+                          type: string
+                        instanceType:
+                          type: string
+                        p95_cpu_usage:
+                          type: double
+                        avg_node_count:
+                          type: double
+                        p95_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p95_cpu_requests:
+                          type: double
+                        p95_cpu_allocatable:
+                          type: double
+                indexRange:
+                - 0
+                - 4
+            total_nodes:
+              type: double
+            total_mcores:
+              type: double
+            count_clusters:
+              type: long
+          indexRange:
+          - 0
+          - 0
+        records:
+        - finding: SCALE_DOWN
+          examples:
+          - finding: SCALE_DOWN
+            cloudType: aws
+            instanceType: m5.large
+            p95_cpu_usage: 58823
+            avg_node_count: 11
+            p95_cpu_limits: 17907845
+            k8s.cluster.name: dok-sandbox-cicd-stack
+            p95_cpu_requests: 4105392
+            p95_cpu_allocatable: 143262762
+          - finding: SCALE_DOWN
+            cloudType: azure
+            instanceType: Standard_D2ads_v5
+            p95_cpu_usage: 43436
+            avg_node_count: 66
+            p95_cpu_limits: 3165690
+            k8s.cluster.name: dtp-dev101-grail
+            p95_cpu_requests: 1965668
+            p95_cpu_allocatable: 143262762
+          - finding: SCALE_DOWN
+            cloudType: azure
+            instanceType: Standard_F8s_v2
+            p95_cpu_usage: 164895
+            avg_node_count: 68
+            p95_cpu_limits: 4476961
+            k8s.cluster.name: dtp-dev104-grail-k8s
+            p95_cpu_requests: 8953923
+            p95_cpu_allocatable: 143262762
+          - finding: SCALE_DOWN
+            cloudType: aws
+            instanceType: m6i.2xlarge
+            p95_cpu_usage: 230220
+            avg_node_count: 69
+            p95_cpu_limits: 2376514
+            k8s.cluster.name: dtp-dev2-grail
+            p95_cpu_requests: 8953923
+            p95_cpu_allocatable: 143262762
+          - finding: SCALE_DOWN
+            cloudType: aws
+            instanceType: m6i.2xlarge
+            p95_cpu_usage: 325851
+            avg_node_count: 73
+            p95_cpu_limits: 901263
+            k8s.cluster.name: dtp-dev3-grail
+            p95_cpu_requests: 4105392
+            p95_cpu_allocatable: 143262762
+          total_nodes: 1690.4071627591918
+          total_mcores: 3813684160.3124084
+          count_clusters: '70'
+        metadata:
+          grail:
+            query: "timeseries { \n  p95_cpu_allocatable = percentile(dt.kubernetes.node.cpu_allocatable,\
+              \ 95, rollup:sum, scalar: true),\n  p95_cpu_usage = percentile(dt.kubernetes.container.cpu_usage,\
+              \ 95, rollup:sum, scalar: true),\n  p95_cpu_limits = percentile(dt.kubernetes.container.limits_cpu,\
+              \ 95, rollup:sum, scalar: true),\n  p95_cpu_requests = percentile(dt.kubernetes.container.requests_cpu,\
+              \ 95, rollup:sum, scalar: true),\n  avg_node_count=avg(dt.kubernetes.nodes,\
+              \ scalar: true)\n}, by: { k8s.cluster.name, k8s.cluster.uid }, from:\
+              \ now()-7d, to:now()\n| lookup [\n  smartscapeNodes \"K8S_NODE\"\n \
+              \ | parse k8s.object, \"JSON:k8s.object\"\n  | fieldsAdd node.labels\
+              \ = `tags:k8s.labels`\n  | fields k8s.cluster.uid, instanceType=node.labels[`beta.kubernetes.io/instance-type`],\n\
+              \  cloudType=substring(k8s.object[spec][providerID], to: indexOf(k8s.object[spec][providerID],\
+              \ \":\"))\n], sourceField:k8s.cluster.uid, lookupField:k8s.cluster.uid,\
+              \ fields:{cloudType, instanceType}\n\n| fieldsAdd finding=coalesce(\n\
+              \    if(p95_cpu_requests > 0.85 * p95_cpu_allocatable, \"SCALE_UP\"\
+              ),\n    if(p95_cpu_requests < 0.4 * p95_cpu_allocatable and p95_cpu_requests\
+              \ / p95_cpu_allocatable > 0.8, \"MORE_SMALLER_NODES\"),\n    if(p95_cpu_requests\
+              \ < 0.4 * p95_cpu_allocatable, \"SCALE_DOWN\"),\n    \"NOMINAL\"\n \
+              \ )\n| sort p95_cpu_allocatable desc\n| summarize by:{finding}, {count_clusters=count(),\
+              \ total_nodes=sum(avg_node_count), total_mcores=sum(p95_cpu_allocatable),\
+              \ examples=collectArray(\n  record(\n    k8s.cluster.name, finding,\
+              \ avg_node_count=round(avg_node_count), p95_cpu_allocatable=round(p95_cpu_allocatable),\
+              \ \n    p95_cpu_usage=round(p95_cpu_usage), p95_cpu_limits=round(p95_cpu_limits),\
+              \ p95_cpu_requests=round(p95_cpu_requests),\n    cloudType, instanceType\
+              \ )\n, maxLength:5)}"
+            locale: und
+            queryId: 7329381c-1070-4a94-83bc-0a7c1ee921ab
+            sampled: false
+            timezone: Z
+            dqlVersion: V1_0
+            scannedBytes: 0
+            notifications: []
+            canonicalQuery: "timeseries from:now() - 7d, to:now(), by:{k8s.cluster.name,\
+              \ k8s.cluster.uid}, {p95_cpu_allocatable = percentile(dt.kubernetes.node.cpu_allocatable,\
+              \ 95, rollup:sum, scalar:TRUE), p95_cpu_usage = percentile(dt.kubernetes.container.cpu_usage,\
+              \ 95, rollup:sum, scalar:TRUE), p95_cpu_limits = percentile(dt.kubernetes.container.limits_cpu,\
+              \ 95, rollup:sum, scalar:TRUE), p95_cpu_requests = percentile(dt.kubernetes.container.requests_cpu,\
+              \ 95, rollup:sum, scalar:TRUE), avg_node_count = avg(dt.kubernetes.nodes,\
+              \ scalar:TRUE)}\n| lookup \n\t[\n\t\tsmartscapeNodes \"K8S_NODE\"\n\t\
+              \t| parse k8s.object, \"JSON:k8s.object\"\n\t\t| fieldsAdd node.labels\
+              \ = `tags:k8s.labels`\n\t\t| fields k8s.cluster.uid, instanceType =\
+              \ node.labels[`beta.kubernetes.io/instance-type`], cloudType = substring(k8s.object[spec][providerID],\
+              \ to:indexOf(k8s.object[spec][providerID], \":\"))\n\t], sourceField:k8s.cluster.uid,\
+              \ lookupField:k8s.cluster.uid, fields:{cloudType, instanceType}\n| fieldsAdd\
+              \ finding = coalesce(if(p95_cpu_requests > 0.85 * p95_cpu_allocatable,\
+              \ \"SCALE_UP\"), if(p95_cpu_requests < 0.4 * p95_cpu_allocatable AND\
+              \ p95_cpu_requests / p95_cpu_allocatable > 0.8, \"MORE_SMALLER_NODES\"\
+              ), if(p95_cpu_requests < 0.4 * p95_cpu_allocatable, \"SCALE_DOWN\"),\
+              \ \"NOMINAL\")\n| sort p95_cpu_allocatable desc\n| summarize by:{finding},\
+              \ {count_clusters = count(), total_nodes = sum(avg_node_count), total_mcores\
+              \ = sum(p95_cpu_allocatable), examples = collectArray(record(k8s.cluster.name,\
+              \ finding, avg_node_count = round(avg_node_count), p95_cpu_allocatable\
+              \ = round(p95_cpu_allocatable), p95_cpu_usage = round(p95_cpu_usage),\
+              \ p95_cpu_limits = round(p95_cpu_limits), p95_cpu_requests = round(p95_cpu_requests),\
+              \ cloudType, instanceType), maxLength:5)}"
+            scannedRecords: 3399
+            analysisTimeframe:
+              end: '2026-01-14T22:00:00.000Z'
+              start: '2026-01-07T21:00:00.000Z'
+            scannedDataPoints: 280016925
+            executionTimeMilliseconds: 11857
+          metrics:
+          - rollup: sum
+            scalar: true
+            fieldName: p95_cpu_allocatable
+            metric.key: dt.kubernetes.node.cpu_allocatable
+          - rollup: sum
+            scalar: true
+            fieldName: p95_cpu_usage
+            metric.key: dt.kubernetes.container.cpu_usage
+          - rollup: sum
+            scalar: true
+            fieldName: p95_cpu_limits
+            metric.key: dt.kubernetes.container.limits_cpu
+          - rollup: sum
+            scalar: true
+            fieldName: p95_cpu_requests
+            metric.key: dt.kubernetes.container.requests_cpu
+          - scalar: true
+            fieldName: avg_node_count
+            metric.key: dt.kubernetes.nodes
+    email_k8s_report:
+      name: email_k8s_report
+      input:
+        cc:
+        - '{{input()["emails"]["cc"]}}'
+        to:
+        - '{{input()["emails"]["to"]}}'
+        bcc:
+        - '{{input()["emails"]["bcc"]}}'
+        content: "AI generated report:\n{{result(\"ks8_report_prompt\")[\"text\"]}}\n\
+          \n-----\n\n# Raw data\n```json\n{\n  \"Cluster optimization\": {\n    \"\
+          CPU\": {{result(\"k8s_cluster_cpu\")[\"records\"] | to_json()}},\n    \"\
+          Memory\": {{result(\"k8s_cluster_memory\")[\"records\"] | to_json()}},\n\
+          \  },\n  \"Workload optimization\": {\n    \"CPU\": {{result(\"k8s_workload_cpu\"\
+          )[\"records\"] | to_json()}}\n    \"Memory\": {{result(\"k8s_workload_memory\"\
+          )[\"records\"] | to_json()}}\n  }\n}\n```"
+        subject: K8s Optimization Report
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 3
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["kubernetes"]}}'
+        states:
+          ks8_report_prompt: SUCCESS
+      description: Send email
+      predecessors:
+      - ks8_report_prompt
+    host_utilization:
+      name: host_utilization
+      input:
+        query: "//Summary of host utilization\ntimeseries { cpu_p90 = percentile(dt.host.cpu.usage,\
+          \ 90, rollup:max, scalar: true), mem_p90 = percentile(dt.host.memory.usage,\
+          \ 90, rollup:max, scalar: true) }, \n  union: TRUE, by: { dt.entity.host\
+          \ }, from: now()-30d, to: now()\n| fieldsAdd dt.entity.host.name = entityName(dt.entity.host),\
+          \ cpu_p90=round(cpu_p90), mem_p90=round(mem_p90)\n| fieldsAdd utilization=coalesce(\n\
+          \  if(cpu_p90 < 10 and mem_p90 < 30, \"UNUSED\"),\n  if(cpu_p90 < 30 and\
+          \ mem_p90 < 50, \"OVERPROVISIONED\"),\n  if(cpu_p90 > 80 and mem_p90 < 85,\
+          \ \"UNDERPROVISIONED\"),\n  \"NOMINAL\"\n)\n| summarize {count=count(),\
+          \ examples=collectArray(\n  record(dt.entity.host.name, dt.entity.host,\
+          \ cpu_p90, mem_p90, cloudType=entityAttr(dt.entity.host,\"cloudType\"),\
+          \ instanceType = coalesce(\n    if(entityAttr(dt.entity.host,\"cloudType\"\
+          )==\"EC2\",entityAttr(dt.entity.host,\"additionalSystemInfo\")[system.model]),\n\
+          \    entityAttr(dt.entity.host,\"azureVmSizeLabel\"),\n    entityAttr(dt.entity.host,\"\
+          gceMachineType\")\n  ))\n,maxLength:5)}, by: {utilization}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 4
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["host"]}}'
+        states:
+          email_k8s_report: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - email_k8s_report
+    k8s_workload_cpu:
+      name: k8s_workload_cpu
+      input:
+        query: "timeseries {\n  p95_cpu_usage = percentile(dt.kubernetes.container.cpu_usage,\
+          \ 95, rollup:max, scalar: true),\n  p95_cpu_throttled = percentile(dt.kubernetes.container.cpu_throttled,\
+          \ 95, rollup:max, scalar: true),\n  p95_cpu_requests = percentile(dt.kubernetes.container.requests_cpu,\
+          \ 95, rollup:max, scalar: true),\n  p95_cpu_limits = percentile(dt.kubernetes.container.limits_cpu,\
+          \ 95, rollup:max, scalar: true)\n}, union: TRUE, by: { k8s.cluster.name,\
+          \ k8s.workload.name, k8s.container.name },\nfrom: now()-7d, to: now()\n\
+          | summarize by:{ k8s.cluster.name, k8s.workload.name}, {replicas=count(),\
+          \ p95_cpu_limits = round(sum(p95_cpu_limits)), p95_cpu_requests=round(sum(p95_cpu_requests)),\
+          \ p95_cpu_throttled=round(sum(p95_cpu_throttled)), p95_cpu_usage=round(sum(p95_cpu_usage))}\n\
+          | fieldsAdd finding=coalesce(\n    if(isNull(p95_cpu_requests) , \"NO_REQUESTS_SET\"\
+          ),\n    if(p95_cpu_requests > p95_cpu_usage * 2, \"REDUCE_REQUESTS\"),\n\
+          \    if(p95_cpu_usage > p95_cpu_requests, \"INCREASE_REQUESTS\"),\n    if(p95_cpu_throttled\
+          \ > 0 and p95_cpu_usage > 0.9 * p95_cpu_limits, \"INCREASE_LIMITS\"),\n\
+          \    if(p95_cpu_throttled == 0 and p95_cpu_limits > 3 * p95_cpu_usage, \"\
+          REDUCE_LIMITS\"),\n    \"NOMINAL\"\n  )\n| sort p95_cpu_requests desc\n\
+          | summarize by:{finding}, {count_workloads_with_finding=count(), examples=collectArray(\n\
+          \  record(k8s.cluster.name, k8s.workload.name, replicas, p95_cpu_limits_mcores=p95_cpu_limits,\
+          \ p95_cpu_requests_mcores=p95_cpu_requests, p95_cpu_throttled_mcores=p95_cpu_throttled,\
+          \ p95_cpu_usage_mcores=p95_cpu_usage)\n,maxLength:10)}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 1
+      conditions:
+        else: STOP
+        custom: '{{input()["scope"]["kubernetes"]}}'
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+      customSampleResult:
+        types:
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_cpu_usage:
+                          type: double
+                        p75_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p75_cpu_requests:
+                          type: double
+                        k8s.workload.name:
+                          type: string
+                        p75_cpu_throttled:
+                          type: double
+                indexRange:
+                - 0
+                - 6
+            count_workloads:
+              type: long
+          indexRange:
+          - 0
+          - 0
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_cpu_usage:
+                          type: double
+                        p75_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p75_cpu_requests:
+                          type: double
+                        k8s.workload.name:
+                          type: string
+                        p75_cpu_throttled:
+                          type: double
+                indexRange:
+                - 0
+                - 9
+            count_workloads:
+              type: long
+          indexRange:
+          - 1
+          - 3
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_cpu_usage:
+                          type: double
+                        p75_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p75_cpu_requests:
+                          type: double
+                        k8s.workload.name:
+                          type: undefined
+                        p75_cpu_throttled:
+                          type: double
+                indexRange:
+                - 0
+                - 0
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_cpu_usage:
+                          type: double
+                        p75_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p75_cpu_requests:
+                          type: double
+                        k8s.workload.name:
+                          type: string
+                        p75_cpu_throttled:
+                          type: double
+                indexRange:
+                - 1
+                - 1
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_cpu_usage:
+                          type: double
+                        p75_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p75_cpu_requests:
+                          type: double
+                        k8s.workload.name:
+                          type: undefined
+                        p75_cpu_throttled:
+                          type: double
+                indexRange:
+                - 2
+                - 2
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_cpu_usage:
+                          type: double
+                        p75_cpu_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p75_cpu_requests:
+                          type: double
+                        k8s.workload.name:
+                          type: string
+                        p75_cpu_throttled:
+                          type: double
+                indexRange:
+                - 3
+                - 9
+            count_workloads:
+              type: long
+          indexRange:
+          - 4
+          - 4
+        records:
+        - finding: INCREASE_LIMITS
+          examples:
+          - replicas: '1'
+            p75_cpu_usage: 3979
+            p75_cpu_limits: 4000
+            k8s.cluster.name: dok-gitops-argo-dev
+            p75_cpu_requests: 4000
+            k8s.workload.name: dtp-dev-csc-vcluster-api
+            p75_cpu_throttled: 10137
+          count_workloads: '7'
+        - finding: INCREASE_REQUESTS
+          examples:
+          - replicas: '1'
+            p75_cpu_usage: 7678
+            p75_cpu_limits: 0
+            k8s.cluster.name: dok-gitops-argo-dev
+            p75_cpu_requests: 7041
+            k8s.workload.name: argocd-application-controller
+            p75_cpu_throttled: 0
+          count_workloads: '9501'
+        - finding: REDUCE_LIMITS
+          examples:
+          - replicas: '2'
+            p75_cpu_usage: 879
+            p75_cpu_limits: 999250
+            k8s.cluster.name: pr599doksandbox-doaks
+            p75_cpu_requests: 1600
+            k8s.workload.name: dt-active-gate-routing
+            p75_cpu_throttled: 0
+          count_workloads: '1139'
+        - finding: REDUCE_REQUESTS
+          examples:
+          - replicas: '52'
+            p75_cpu_usage: 637
+            p75_cpu_limits: 7921
+            k8s.cluster.name: dtp-dev101-grail
+            p75_cpu_requests: 28157
+            p75_cpu_throttled: 2
+          count_workloads: '64021'
+        metadata: {}
+    disk_overutilized:
+      name: disk_overutilized
+      input:
+        query: "//over-utilized disks: 'max_disk_percent' > 95%\ntimeseries { \n \
+          \ max_disk_percent = max(dt.host.disk.used.percent, scalar: true), \n  disk_size\
+          \ = max(dt.host.disk.used, scalar: true),\n  p90_disk_percent = percentile(dt.host.disk.used.percent,\
+          \ rollup:max, 90, scalar:true),\n  avg_disk_percent = avg(dt.host.disk.used.percent,\
+          \ scalar:true)\n}, \n  by: { dt.entity.host, dt.entity.disk },\n  from:\
+          \ now()-30d, to: now()\n| fieldsAdd dt.entity.host.name = entityName(dt.entity.host)\n\
+          | fieldsAdd dt.entity.disk.name = entityName(dt.entity.disk)\n| fieldsAdd\
+          \ max_disk_percent=round(max_disk_percent), p90_disk_percent=round(p90_disk_percent),\
+          \ avg_disk_percent=round(avg_disk_percent)\n| filter disk_size > 50000000000\
+          \ and max_disk_percent > 95\n| sort p90_disk_percent desc\n| summarize {count=count(),\
+          \ examples=collectArray(\n  record(dt.entity.host.name, dt.entity.disk.name,\
+          \ disk_size, max_disk_percent, p90_disk_percent, avg_disk_percent)\n, maxLength:10)}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 7
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["disk"]}}'
+        states:
+          email_host_report: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - email_host_report
+    email_disk_report:
+      name: email_disk_report
+      input:
+        cc:
+        - '{{input()["emails"]["cc"]}}'
+        to:
+        - '{{input()["emails"]["to"]}}'
+        bcc:
+        - '{{input()["emails"]["bcc"]}}'
+        content: 'AI generated report:
+
+          {{result("disk_report_prompt").text}}'
+        subject: Disk Optimization Report
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 9
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["disk"]}}'
+        states:
+          disk_report_prompt: OK
+      description: Send email
+      predecessors:
+      - disk_report_prompt
+    email_host_report:
+      name: email_host_report
+      input:
+        cc:
+        - '{{input()["emails"]["cc"]}}'
+        to:
+        - '{{input()["emails"]["to"]}}'
+        bcc:
+        - '{{input()["emails"]["bcc"]}}'
+        content: 'AI generated report:
+
+          {{result("host_report_prompt").text}}'
+        subject: Host Optimization Report
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 6
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["host"]}}'
+        states:
+          host_report_prompt: OK
+      description: Send email
+      predecessors:
+      - host_report_prompt
+    ks8_report_prompt:
+      name: ks8_report_prompt
+      input:
+        config: disabled
+        prompt: "Provide a `Kubernetes Optimization Report`, in markdown for these\
+          \ 2 usecases:\n\n# 1. Optimize pod sizing\nGoal: identify pod optimization\
+          \ opportunities and recommend Kubernetes pod `requests` and `limits` for\
+          \ CPU and memory that reduce OOMKills/throttling while avoiding wasted reserved\
+          \ capacity.\nUse the data provided in the context. Findings are already\
+          \ provided for scale; however, still analyze the numbers and produce a recommendation\
+          \ for `requests` and `limits` for each example, if appropriate.\n\n# 2.\
+          \ Optimize cluster sizing\nGoals:\n1. Shutdown unneeded nodes to save on\
+          \ cost, assuming Pods have already been optimized above.\n2. Reduce over-provisioned\
+          \ nodes to save on cost\n3. Increase the size of under-provisioned nodes\
+          \ to reduce risk\nUse the data provided in the context. Findings are already\
+          \ provided for scale; however, still analyze the numbers and produce a recommendation\
+          \ for each example cluster. For instance, you could recommend reducing the\
+          \ number of nodes by 3 or scale down from a `m7a.2xlarge` to a `m7a.large`.\n\
+          If possible, using the recommendations you generate and the instanceType\
+          \ and cloudType, estimate potential cost savings.\n\n# Golden rules\n1.\
+          \ Always show all of the provided findings in the context\n2. Always show\
+          \ all metrics that were include in the context for each example\n3. Do not\
+          \ skip examples and always indicate that they are just a small sample of\
+          \ the total findings provided at the end of the email.\n4. Validate your\
+          \ results, using the following method:\n  a. Generate your recommendations\n\
+          \  b. Pass the recommendations back through LLM, asking it to test for reasonableness\n\
+          \  c. If it rules that the recommendations are unreasonable, revise and\
+          \ repeat\n  d. Repeat no more than 5 times\n5. Be sure to include the count\
+          \ of similar findings from the context, when giving the sample recommendations."
+        autoTrim: true
+        instruction: 'Be sure the report includes an overview, summary counts, examples,
+          and if possible an estimate of cost savings.
+
+          Format examples in tables instead of bulleted lists.
+
+          Where applicable convert units for readability, e.g. 1000000000 bytes is
+          1 TiB.
+
+          Where applicable show relative percentages, e.g. 100 used and 1000 allocatable
+          is 10% utilized.'
+        supplementary: "{\n  \"Cluster optimization\": {\n    \"CPU\": {{result(\"\
+          k8s_cluster_cpu\")[\"records\"]}},\n    \"Memory\": {{result(\"k8s_cluster_memory\"\
+          )[\"records\"]}},\n  },\n  \"Workload optimization\": {\n    \"CPU\": {{result(\"\
+          k8s_workload_cpu\")[\"records\"]}}\n    \"Memory\": {{result(\"k8s_workload_memory\"\
+          )[\"records\"]}}\n  }\n}"
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 2
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["kubernetes"]}}'
+        states:
+          k8s_cluster_cpu: OK
+          k8s_workload_cpu: OK
+          k8s_cluster_memory: OK
+          k8s_workload_memory: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - k8s_workload_cpu
+      - k8s_workload_memory
+      - k8s_cluster_cpu
+      - k8s_cluster_memory
+      customSampleResult:
+        text: "# Optimization Report: Cluster and Pod Sizing\n\n## Optimize Cluster\
+          \ Sizing\n\nTo optimize cluster sizing, the following recommendations are\
+          \ provided based on the user's goals:\n\n1. **Shutdown Unneeded Nodes**:\n\
+          \   - Identify clusters with low resource utilization (CPU and memory) across\
+          \ nodes. For example:\n     - Clusters with fewer nodes and low allocatable\
+          \ resources, such as `mission-control-sandbox` (6 nodes, 11,580 millicores\
+          \ CPU, low memory usage).\n     - Clusters with minimal workloads or idle\
+          \ nodes.\n   - Review workloads running on these clusters and consolidate\
+          \ them into fewer nodes where possible.\n\n2. **Reduce Over-Provisioned\
+          \ Nodes**:\n   - Analyze clusters with high average allocatable resources\
+          \ per node but low utilization:\n     - Example: `eks-sc2-cluster` (10 nodes,\
+          \ 15,890 millicores CPU per node).\n   - Adjust node sizes or reduce the\
+          \ number of nodes to match actual workload requirements.\n   - Use Dynatrace's\
+          \ resource monitoring to identify nodes with consistently low utilization.\n\
+          \n3. **Increase the Size of Under-Provisioned Nodes**:\n   - Identify clusters\
+          \ with high risk due to under-provisioning:\n     - Example: Clusters with\
+          \ frequent OOM kills, such as `SPINE Dev` (16 OOM kills in workload `dynamock`).\n\
+          \   - Increase node sizes or add additional nodes to ensure workloads have\
+          \ sufficient resources.\n   - Monitor workloads with high resource demands\
+          \ and adjust node configurations accordingly.\n\n---\n\n## Optimize Pod\
+          \ Sizing\n\nTo optimize pod sizing and prevent OOM errors or resource wastage,\
+          \ follow these recommendations:\n\n1. **Prevent OOM Errors**:\n   - Identify\
+          \ workloads with OOM kills and increase memory limits:\n     - Example:\
+          \ `argocd-server` in `dok-gitops-argo-dev` (6 OOM kills).\n     - Example:\
+          \ `dbm-analyzer` in `dtp-dev101-grail` (3 OOM kills).\n   - Use Dynatrace's\
+          \ memory monitoring to set appropriate memory limits based on historical\
+          \ usage patterns.\n\n2. **Avoid Over-Provisioning**:\n   - Review workloads\
+          \ with high memory limits but low working set usage:\n     - Example: `query-frontend`\
+          \ in `dtp-dev1-grail` has high memory limits but may not utilize the allocated\
+          \ resources.\n   - Adjust memory limits to match actual usage, freeing up\
+          \ cluster capacity for other workloads.\n\n3. **Monitor and Adjust Resource\
+          \ Requests**:\n   - Use Dynatrace to monitor CPU and memory requests versus\
+          \ actual usage for each pod.\n   - Continuously refine resource requests\
+          \ and limits to balance performance and cost efficiency.\n\n---\n\n## Actionable\
+          \ Steps\n\n1. Use Dynatrace's **Cluster Resource Monitoring** to identify\
+          \ under-utilized nodes and workloads.\n2. Leverage **Workload Resource Monitoring**\
+          \ to analyze memory and CPU usage patterns for pods.\n3. Implement **Auto-scaling**\
+          \ for clusters and pods to dynamically adjust resources based on demand.\n\
+          4. Regularly review OOM kill events and adjust memory limits for affected\
+          \ workloads.\n5. Consolidate workloads into fewer nodes where possible and\
+          \ shut down idle nodes.\n\nBy following these recommendations, the user\
+          \ can optimize cluster and pod sizing to reduce costs, improve efficiency,\
+          \ and mitigate risks."
+        state:
+          history:
+          - role: user
+            text: "Provide a markdown report for:\n# Optimize cluster sizing\nThe\
+              \ user wants to optimize the size of their clusters, they generally\
+              \ have three goals:\n1. Shutdown unneeded nodes\n2. Reduce over-provisioned\
+              \ nodes to save on cost\n3. Increase the size of under-provisioned nodes\
+              \ to reduce risk\n\n# Optimize pod sizing\nIf have limits set too low,\
+              \ they may get out of memory (OOM) errors and fail. If their limits\
+              \ are too high, \nthey will reserve memory in the cluster that never\
+              \ gets used, wasting cluster capacity."
+          - role: ai
+            text: "# Optimization Report: Cluster and Pod Sizing\n\n## Optimize Cluster\
+              \ Sizing\n\nTo optimize cluster sizing, the following recommendations\
+              \ are provided based on the user's goals:\n\n1. **Shutdown Unneeded\
+              \ Nodes**:\n   - Identify clusters with low resource utilization (CPU\
+              \ and memory) across nodes. For example:\n     - Clusters with fewer\
+              \ nodes and low allocatable resources, such as `mission-control-sandbox`\
+              \ (6 nodes, 11,580 millicores CPU, low memory usage).\n     - Clusters\
+              \ with minimal workloads or idle nodes.\n   - Review workloads running\
+              \ on these clusters and consolidate them into fewer nodes where possible.\n\
+              \n2. **Reduce Over-Provisioned Nodes**:\n   - Analyze clusters with\
+              \ high average allocatable resources per node but low utilization:\n\
+              \     - Example: `eks-sc2-cluster` (10 nodes, 15,890 millicores CPU\
+              \ per node).\n   - Adjust node sizes or reduce the number of nodes to\
+              \ match actual workload requirements.\n   - Use Dynatrace's resource\
+              \ monitoring to identify nodes with consistently low utilization.\n\n\
+              3. **Increase the Size of Under-Provisioned Nodes**:\n   - Identify\
+              \ clusters with high risk due to under-provisioning:\n     - Example:\
+              \ Clusters with frequent OOM kills, such as `SPINE Dev` (16 OOM kills\
+              \ in workload `dynamock`).\n   - Increase node sizes or add additional\
+              \ nodes to ensure workloads have sufficient resources.\n   - Monitor\
+              \ workloads with high resource demands and adjust node configurations\
+              \ accordingly.\n\n---\n\n## Optimize Pod Sizing\n\nTo optimize pod sizing\
+              \ and prevent OOM errors or resource wastage, follow these recommendations:\n\
+              \n1. **Prevent OOM Errors**:\n   - Identify workloads with OOM kills\
+              \ and increase memory limits:\n     - Example: `argocd-server` in `dok-gitops-argo-dev`\
+              \ (6 OOM kills).\n     - Example: `dbm-analyzer` in `dtp-dev101-grail`\
+              \ (3 OOM kills).\n   - Use Dynatrace's memory monitoring to set appropriate\
+              \ memory limits based on historical usage patterns.\n\n2. **Avoid Over-Provisioning**:\n\
+              \   - Review workloads with high memory limits but low working set usage:\n\
+              \     - Example: `query-frontend` in `dtp-dev1-grail` has high memory\
+              \ limits but may not utilize the allocated resources.\n   - Adjust memory\
+              \ limits to match actual usage, freeing up cluster capacity for other\
+              \ workloads.\n\n3. **Monitor and Adjust Resource Requests**:\n   - Use\
+              \ Dynatrace to monitor CPU and memory requests versus actual usage for\
+              \ each pod.\n   - Continuously refine resource requests and limits to\
+              \ balance performance and cost efficiency.\n\n---\n\n## Actionable Steps\n\
+              \n1. Use Dynatrace's **Cluster Resource Monitoring** to identify under-utilized\
+              \ nodes and workloads.\n2. Leverage **Workload Resource Monitoring**\
+              \ to analyze memory and CPU usage patterns for pods.\n3. Implement **Auto-scaling**\
+              \ for clusters and pods to dynamically adjust resources based on demand.\n\
+              4. Regularly review OOM kill events and adjust memory limits for affected\
+              \ workloads.\n5. Consolidate workloads into fewer nodes where possible\
+              \ and shut down idle nodes.\n\nBy following these recommendations, the\
+              \ user can optimize cluster and pod sizing to reduce costs, improve\
+              \ efficiency, and mitigate risks."
+          version: '0.3'
+          skillName: recommender
+          conversationId: 9e2ce1a3-75cc-4572-aa8f-59ef17f5e374
+        status: SUCCESSFUL
+        metadata:
+          sources: []
+          notifications: []
+        messageToken: c63e116e-5c6f-4b53-bc04-f1054a4afb3a
+    disk_report_prompt:
+      name: disk_report_prompt
+      input:
+        config: disabled
+        prompt: 'Provide a markdown report for:
+
+          ## Optimize disk usage
+
+          If disk utilization is not optimized, it can result in either wasted spend
+          or worse preventable outages. If the user asked for disk optimization, you
+          should provide two things:
+
+          1. Disks that are overutilized and likely to fill
+
+          2. Disks that are underutilized and will likely never fill, which can safely
+          be shrunken
+
+          Note: disks that are less than 50GiB are not relevant.'
+        autoTrim: true
+        instruction: ''
+        supplementary: "{\n  \"Overutilized disks\": {{result(\"disk_overutilized\"\
+          )[\"records\"]}},\n  \"Underutilized disks\": {{result(\"disk_underutilized\"\
+          )[\"records\"]}}\n}"
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 8
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["disk"]}}'
+        states:
+          disk_overutilized: OK
+          disk_underutilized: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - disk_underutilized
+      - disk_overutilized
+    disk_underutilized:
+      name: disk_underutilized
+      input:
+        query: "//under-utilized disks: 'max_disk_percent' < 50%\ntimeseries { \n\
+          \  max_disk_percent = max(dt.host.disk.used.percent, scalar: true), \n \
+          \ disk_size = max(dt.host.disk.used, scalar: true),\n  p90_disk_percent\
+          \ = percentile(dt.host.disk.used.percent, rollup:max, 90, scalar:true),\n\
+          \  avg_disk_percent = avg(dt.host.disk.used.percent, scalar:true)\n}, \n\
+          \  by: { dt.entity.host, dt.entity.disk }\n| fieldsAdd dt.entity.host.name\
+          \ = entityName(dt.entity.host)\n| fieldsAdd dt.entity.disk.name = entityName(dt.entity.disk)\n\
+          | fieldsAdd max_disk_percent=round(max_disk_percent), p90_disk_percent=round(p90_disk_percent),\
+          \ avg_disk_percent=round(avg_disk_percent)\n| filter disk_size > 50000000000\
+          \ and max_disk_percent < 50\n| sort disk_size desc\n| fieldsAdd percent_unused=(100\
+          \ - max_disk_percent)/100\n| summarize {count=count(), total_unused=sum(disk_size*(percent_unused)),\
+          \ examples=collectArray(\n  record(dt.entity.host.name, dt.entity.disk.name,\
+          \ disk_size, max_disk_percent, p90_disk_percent, avg_disk_percent)\n, maxLength:5)}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 7
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["disk"]}}'
+        states:
+          email_host_report: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - email_host_report
+    host_report_prompt:
+      name: host_report_prompt
+      input:
+        config: disabled
+        prompt: 'Provide a markdown report for the following use case:
+
+          ## Optimize host sizing
+
+          If a user wants to optimize the size of their hosts, they generally have
+          three goals:
+
+          1. Shutdown potentially unused hosts
+
+          2. Reduce over-provisioned hosts to save on cost
+
+          3. Increase the size of under-provisioned hosts to reduce risk
+
+
+          Be sure to provide an overview (including number of hosts per utilization)
+          and any insights from the data provided. If possible give an estimated range
+          of cost savings.'
+        autoTrim: true
+        instruction: Instead of bulleted list, format example hosts in a table.
+        supplementary: 'Use this analysis of p90 CPU and Memory for the past 30 days:
+
+          {{result("host_utilization")["records"]}}'
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 5
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["host"]}}'
+        states:
+          host_utilization: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - host_utilization
+    k8s_cluster_memory:
+      name: k8s_cluster_memory
+      input:
+        query: "timeseries { \n  p95_mem_allocatable = percentile(dt.kubernetes.node.memory_allocatable,\
+          \ 95, rollup:sum, scalar: true),\n  p95_mem_usage = percentile(dt.kubernetes.container.memory_working_set,\
+          \ 95, rollup:sum, scalar: true),\n  p95_mem_limits = percentile(dt.kubernetes.container.limits_memory,\
+          \ 95, rollup:sum, scalar: true),\n  p95_mem_requests = percentile(dt.kubernetes.container.requests_memory,\
+          \ 95, rollup:sum, scalar: true),\n  avg_node_count=avg(dt.kubernetes.nodes,\
+          \ scalar: true)\n}, by: { dt.smartscape.k8s_cluster, k8s.cluster.name, k8s.cluster.uid\
+          \ }, from: now()-1d, to:now()\n| lookup [\n  smartscapeNodes \"K8S_NODE\"\
+          \n  | parse k8s.object, \"JSON:k8s.object\"\n  | fieldsAdd node.labels =\
+          \ `tags:k8s.labels`\n  | fields k8s.cluster.uid, instanceType=node.labels[`beta.kubernetes.io/instance-type`],\n\
+          \  cloudType=substring(k8s.object[spec][providerID], to: indexOf(k8s.object[spec][providerID],\
+          \ \":\"))\n], sourceField:k8s.cluster.uid, lookupField:k8s.cluster.uid,\
+          \ fields:{cloudType, instanceType}\n  \n| fieldsAdd finding=coalesce(\n\
+          \    if(p95_mem_requests > 0.85 * p95_mem_allocatable, \"SCALE_UP\"),\n\
+          \    if(p95_mem_requests < 0.4 * p95_mem_allocatable and p95_mem_requests\
+          \ / p95_mem_allocatable > 0.8, \"MORE_SMALLER_NODES\"),\n    if(p95_mem_requests\
+          \ < 0.4 * p95_mem_allocatable, \"SCALE_DOWN\"),\n    \"NOMINAL\"\n  )\n\
+          | sort p95_mem_allocatable desc\n| summarize by:{finding}, {count_clusters_with_finding=count(),\
+          \ total_nodes=sum(avg_node_count), total_allocatable_mem=sum(p95_mem_allocatable),\
+          \ examples=collectArray(\n  record(k8s.cluster.name, finding, avg_node_count=round(avg_node_count),\
+          \ p95_mem_allocatable=round(p95_mem_allocatable), \n    p95_mem_usage=round(p95_mem_usage),\
+          \ p95_mem_limits=round(p95_mem_limits), p95_mem_requests=round(p95_mem_requests),\
+          \ cloudType, instanceType )\n, maxLength:5)}"
+      action: dynatrace.automations:execute-dql-query
+      active: true
+      position:
+        x: -1
+        y: 1
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["kubernetes"]}}'
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+      customSampleResult:
+        types:
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        finding:
+                          type: string
+                        cloudType:
+                          type: string
+                        instanceType:
+                          type: string
+                        p95_mem_usage:
+                          type: double
+                        avg_node_count:
+                          type: double
+                        p95_mem_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p95_mem_requests:
+                          type: double
+                        p95_mem_allocatable:
+                          type: double
+                indexRange:
+                - 0
+                - 2
+            total_nodes:
+              type: double
+            count_clusters:
+              type: long
+            total_allocatable_mem:
+              type: double
+          indexRange:
+          - 0
+          - 0
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        finding:
+                          type: string
+                        cloudType:
+                          type: string
+                        instanceType:
+                          type: string
+                        p95_mem_usage:
+                          type: double
+                        avg_node_count:
+                          type: double
+                        p95_mem_limits:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        p95_mem_requests:
+                          type: double
+                        p95_mem_allocatable:
+                          type: double
+                indexRange:
+                - 0
+                - 4
+            total_nodes:
+              type: double
+            count_clusters:
+              type: long
+            total_allocatable_mem:
+              type: double
+          indexRange:
+          - 1
+          - 1
+        records:
+        - finding: NOMINAL
+          examples:
+          - finding: NOMINAL
+            cloudType: aws
+            instanceType: c6i.xlarge
+            p95_mem_usage: 885471860626
+            avg_node_count: 7
+            p95_mem_limits: 2980834425686
+            k8s.cluster.name: iam-sandbox-ireland
+            p95_mem_requests: 2733437220478
+            p95_mem_allocatable: 5466874440956
+          - finding: NOMINAL
+            cloudType: aws
+            instanceType: c6i.xlarge
+            p95_mem_usage: 966415997274
+            avg_node_count: 7
+            p95_mem_limits: 2831726903366
+            k8s.cluster.name: iam-dev-ireland
+            p95_mem_requests: 2763950756857
+            p95_mem_allocatable: 5466874440956
+          - finding: NOMINAL
+            cloudType: aws
+            instanceType: c6i.xlarge
+            p95_mem_usage: 350413831454
+            avg_node_count: 7
+            p95_mem_limits: 2904141292072
+            k8s.cluster.name: iam-test-ireland
+            p95_mem_requests: 2733437220478
+            p95_mem_allocatable: 5466874440956
+          total_nodes: 21
+          count_clusters: '3'
+          total_allocatable_mem: 16400623322868.617
+        - finding: SCALE_DOWN
+          examples:
+          - finding: SCALE_DOWN
+            cloudType: aws
+            instanceType: i8g.4xlarge
+            p95_mem_usage: 1625311495503
+            avg_node_count: 84
+            p95_mem_limits: 8090059494274
+            k8s.cluster.name: dtp-dev7-grail
+            p95_mem_requests: 8359349920081
+            p95_mem_allocatable: 104019935712186
+          - finding: SCALE_DOWN
+            cloudType: azure
+            instanceType: Standard_F8s_v2
+            p95_mem_usage: 2107768235997
+            avg_node_count: 68
+            p95_mem_limits: 6501245982012
+            k8s.cluster.name: dtp-dev104-grail-k8s
+            p95_mem_requests: 6501245982012
+            p95_mem_allocatable: 104019935712186
+          - finding: SCALE_DOWN
+            cloudType: aws
+            instanceType: m6i.xlarge
+            p95_mem_usage: 2298537560021
+            avg_node_count: 86
+            p95_mem_limits: 10026291932098
+            k8s.cluster.name: dtp-dev5-grail
+            p95_mem_requests: 10026291932098
+            p95_mem_allocatable: 104019935712186
+          - finding: SCALE_DOWN
+            cloudType: aws
+            instanceType: m6i.2xlarge
+            p95_mem_usage: 2674452518740
+            avg_node_count: 73
+            p95_mem_limits: 16862145887977
+            k8s.cluster.name: dtp-dev3-grail
+            p95_mem_requests: 16862145887977
+            p95_mem_allocatable: 104019935712186
+          - finding: SCALE_DOWN
+            cloudType: azure
+            instanceType: Standard_D8ds_v4
+            p95_mem_usage: 878116697710
+            avg_node_count: 22
+            p95_mem_limits: 4597075120042
+            k8s.cluster.name: doaks-dev-readinesse2e-westeu
+            p95_mem_requests: 1625311495503
+            p95_mem_allocatable: 104019935712186
+          total_nodes: 1633.4856451275703
+          count_clusters: '65'
+          total_allocatable_mem: 1796765843742310.8
+        metadata: {}
+    k8s_workload_memory:
+      name: k8s_workload_memory
+      input:
+        query: "timeseries { \n  p95_limits = percentile(dt.kubernetes.container.limits_memory,\
+          \ 95, rollup: max, scalar: true), \n  p95_requests = percentile(dt.kubernetes.container.requests_memory,\
+          \ 95, rollup: max, scalar: true), \n  p95_working_set = percentile(dt.kubernetes.container.memory_working_set,\
+          \ 95, rollup: max, scalar: true),\n  sum_oom_kills = sum(dt.kubernetes.container.oom_kills,\
+          \ scalar: true)\n}, union: TRUE, by: { k8s.cluster.name, k8s.workload.name\
+          \ },\nfrom: now()-7d, to: now()\n| summarize by:{ k8s.cluster.name, k8s.workload.name},\
+          \ {replicas=count(), p95_limits = round(sum(p95_limits)), p95_requests=round(sum(p95_requests)),\
+          \ p95_working_set=round(sum(p95_working_set)), sum_oom_kills=sum(sum_oom_kills)}\n\
+          | fieldsAdd finding=coalesce(\n    if(sum_oom_kills > 0, \"OOM_KILLS\"),\n\
+          \    if(isNull(p95_limits) , \"NO_LIMIT_SET\"),\n    if(p95_requests > p95_working_set\
+          \ * 1.5, \"REDUCE_REQUESTS\"),\n    if(p95_working_set > p95_requests, \"\
+          INCREASE_REQUESTS\"),\n    if(p95_requests > 0.9 * p95_limits, \"INCREASE_LIMITS\"\
+          ),\n    if(sum_oom_kills == 0 and p95_limits > 2.5 * p95_working_set, \"\
+          REDUCE_LIMITS\"),\n    \"NOMINAL\"\n  )\n| sort p95_requests desc\n| summarize\
+          \ by:{finding}, {count_workloads_with_finding=count(), examples=collectArray(\n\
+          \  record(k8s.cluster.name, k8s.workload.name, replicas, p95_limits, p95_requests,\
+          \ p95_working_set, sum_oom_kills)\n,maxLength:10)}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 2
+        y: 1
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["kubernetes"]}}'
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+      customSampleResult:
+        types:
+        - mappings:
+            finding:
+              type: string
+            examples:
+              type: array
+              types:
+              - mappings:
+                  element:
+                    type: record
+                    types:
+                    - mappings:
+                        replicas:
+                          type: long
+                        p75_limits:
+                          type: double
+                        p75_requests:
+                          type: double
+                        sum_oom_kills:
+                          type: double
+                        p75_working_set:
+                          type: double
+                        k8s.cluster.name:
+                          type: string
+                        k8s.workload.name:
+                          type: string
+                indexRange:
+                - 0
+                - 9
+            count_workloads:
+              type: long
+          indexRange:
+          - 0
+          - 5
+        records:
+        - finding: INCREASE_LIMITS
+          examples:
+          - replicas: '1'
+            p75_limits: 131735514750
+            p75_requests: 131735514750
+            sum_oom_kills: 0
+            p75_working_set: 120801999659
+            k8s.cluster.name: dtp-dev2-grail
+            k8s.workload.name: segment-indexer-manager-deployment
+          count_workloads: '1148'
+        - finding: INCREASE_REQUESTS
+          examples:
+          - replicas: '1'
+            p75_limits: 5338744571
+            p75_requests: 4203921035
+            sum_oom_kills: 0
+            p75_working_set: 4584408396
+            k8s.cluster.name: dtp-dev5-grail
+            k8s.workload.name: kafka-backup-service
+          count_workloads: '19086'
+        - finding: NOMINAL
+          examples:
+          - replicas: '1'
+            p75_limits: 5338744571
+            p75_requests: 4203921035
+            sum_oom_kills: 0
+            p75_working_set: 2972621071
+            k8s.cluster.name: dtp-dev3-grail
+            k8s.workload.name: kafka-backup-service
+          count_workloads: '841'
+        - finding: OOM_KILLS
+          examples:
+          - replicas: '1'
+            p75_limits: 6348873029
+            p75_requests: 6348873029
+            sum_oom_kills: 3
+            p75_working_set: 6348873029
+            k8s.cluster.name: dtp-dev5-apigw
+            k8s.workload.name: apigateway-public
+          count_workloads: '66'
+        - finding: REDUCE_LIMITS
+          examples:
+          - replicas: '1'
+            p75_limits: 2147483648
+            p75_requests: 1073741824
+            sum_oom_kills: 0
+            p75_working_set: 735002624
+            k8s.cluster.name: dok-gitops-argo-dev
+            k8s.workload.name: juno-base-clusters-sandbox-bsw5p-runner-qknqj-workfl-1c0135ac50
+          count_workloads: '2307'
+        - finding: REDUCE_REQUESTS
+          examples:
+          - replicas: '1'
+            p75_limits: 131735514750
+            p75_requests: 131735514750
+            sum_oom_kills: 0
+            p75_working_set: 5139352175
+            k8s.cluster.name: dtp-dev1-grail
+            k8s.workload.name: query-frontend
+          count_workloads: '62252'
+        metadata:
+          grail:
+            query: "timeseries { \n  p75_limits = percentile(dt.kubernetes.container.limits_memory,\
+              \ 75, rollup: max, scalar: true), \n  p75_requests = percentile(dt.kubernetes.container.requests_memory,\
+              \ 75, rollup: max, scalar: true), \n  p75_working_set = percentile(dt.kubernetes.container.memory_working_set,\
+              \ 75, rollup: max, scalar: true),\n  sum_oom_kills = sum(dt.kubernetes.container.oom_kills,\
+              \ scalar: true)\n}, union: TRUE, by: { k8s.cluster.name, k8s.workload.name\
+              \ },\nfrom: now()-7d, to: now()\n| summarize by:{ k8s.cluster.name,\
+              \ k8s.workload.name}, {replicas=count(), p75_limits = round(sum(p75_limits)),\
+              \ p75_requests=round(sum(p75_requests)), p75_working_set=round(sum(p75_working_set)),\
+              \ sum_oom_kills=sum(sum_oom_kills)}\n| fieldsAdd finding=coalesce(\n\
+              \    if(sum_oom_kills > 0, \"OOM_KILLS\"),\n    if(isNull(p75_limits)\
+              \ , \"NO_LIMIT_SET\"),\n    if(p75_requests > p75_working_set * 1.5,\
+              \ \"REDUCE_REQUESTS\"),\n    if(p75_working_set > p75_requests, \"INCREASE_REQUESTS\"\
+              ),\n    if(p75_requests > 0.9 * p75_limits, \"INCREASE_LIMITS\"),\n\
+              \    if(sum_oom_kills == 0 and p75_limits > 2.5 * p75_working_set, \"\
+              REDUCE_LIMITS\"),\n    \"NOMINAL\"\n  )\n| sort p75_requests desc\n\
+              | summarize by:{finding}, {count_workloads=count(), examples=collectArray(\n\
+              \  record(k8s.cluster.name, k8s.workload.name, replicas, p75_limits,\
+              \ p75_requests, p75_working_set, sum_oom_kills)\n,maxLength:10)}"
+            locale: und
+            queryId: cfeda5bc-0197-4a5f-8854-e42bafa1688e
+            sampled: false
+            timezone: Z
+            dqlVersion: V1_0
+            scannedBytes: 0
+            notifications: []
+            canonicalQuery: 'timeseries from:now() - 7d, to:now(), by:{k8s.cluster.name,
+              k8s.workload.name}, union:TRUE, {p75_limits = percentile(dt.kubernetes.container.limits_memory,
+              75, rollup:max, scalar:TRUE), p75_requests = percentile(dt.kubernetes.container.requests_memory,
+              75, rollup:max, scalar:TRUE), p75_working_set = percentile(dt.kubernetes.container.memory_working_set,
+              75, rollup:max, scalar:TRUE), sum_oom_kills = sum(dt.kubernetes.container.oom_kills,
+              scalar:TRUE)}
+
+              | summarize by:{k8s.cluster.name, k8s.workload.name}, {replicas = count(),
+              p75_limits = round(sum(p75_limits)), p75_requests = round(sum(p75_requests)),
+              p75_working_set = round(sum(p75_working_set)), sum_oom_kills = sum(sum_oom_kills)}
+
+              | fieldsAdd finding = coalesce(if(sum_oom_kills > 0, "OOM_KILLS"), if(isNull(p75_limits),
+              "NO_LIMIT_SET"), if(p75_requests > p75_working_set * 1.5, "REDUCE_REQUESTS"),
+              if(p75_working_set > p75_requests, "INCREASE_REQUESTS"), if(p75_requests
+              > 0.9 * p75_limits, "INCREASE_LIMITS"), if(sum_oom_kills == 0 AND p75_limits
+              > 2.5 * p75_working_set, "REDUCE_LIMITS"), "NOMINAL")
+
+              | sort p75_requests desc
+
+              | summarize by:{finding}, {count_workloads = count(), examples = collectArray(record(k8s.cluster.name,
+              k8s.workload.name, replicas, p75_limits, p75_requests, p75_working_set,
+              sum_oom_kills), maxLength:10)}'
+            scannedRecords: 0
+            analysisTimeframe:
+              end: '2026-01-14T22:00:00.000Z'
+              start: '2026-01-07T21:00:00.000Z'
+            scannedDataPoints: 326631027
+            executionTimeMilliseconds: 8949
+          metrics:
+          - rollup: max
+            scalar: true
+            fieldName: p75_limits
+            metric.key: dt.kubernetes.container.limits_memory
+          - rollup: max
+            scalar: true
+            fieldName: p75_requests
+            metric.key: dt.kubernetes.container.requests_memory
+          - rollup: max
+            scalar: true
+            fieldName: p75_working_set
+            metric.key: dt.kubernetes.container.memory_working_set
+          - scalar: true
+            fieldName: sum_oom_kills
+            metric.key: dt.kubernetes.container.oom_kills
+    email_network_report:
+      name: email_network_report
+      input:
+        cc:
+        - '{{input()["emails"]["cc"]}}'
+        to:
+        - '{{input()["emails"]["to"]}}'
+        bcc:
+        - '{{input()["emails"]["bcc"]}}'
+        content: 'AI generated report:
+
+          {{result("network_report_prompt").text}}'
+        subject: Network Optimization Report
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 12
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["network"]}}'
+        states:
+          network_report_prompt: OK
+      description: Send email
+      predecessors:
+      - network_report_prompt
+    network_report_prompt:
+      name: network_report_prompt
+      input:
+        config: disabled
+        prompt: 'Provide a markdown report for:
+
+          ## Identify saturated interfaces
+
+          Saturated interfaces could cause network slowdowns and require either upgrades
+          or rerouting traffic.
+
+
+          ## Identify up/down interfaces
+
+          Network admininstrators refer to interfaces as "up/down", when the administrative
+          status is "up" but the operational status is "down". Sometimes this is normal,
+          e.g. a port for a user''s computer is down; however, many times this can
+          also mean that a port that is intended to be up is for some reason down,
+          perhaps due to a cable or NIC issue.'
+        autoTrim: true
+        instruction: ''
+        supplementary: "{\n  \"Saturated interfaces\": {{result(\"network_saturated_interfaces\"\
+          )[\"records\"]}},\n  \"Up/Down interfaces\": {{result(\"network_saturated_interfaces\"\
+          )[\"records\"]}}\n}"
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 11
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["network"]}}'
+        states:
+          network_updown_interfaces: OK
+          network_saturated_interfaces: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - network_saturated_interfaces
+      - network_updown_interfaces
+    network_updown_interfaces:
+      name: network_updown_interfaces
+      input:
+        query: '//list of up/down interfaces
+
+          fetch `dt.entity.network:interface`
+
+          |fieldsAdd parentDevice=runs_on[`dt.entity.network:device`], ifAdminStatus,
+          ifOperStatus, type=if(isNull(if_type), type, else:if_type)
+
+          |fields network_area=entityAttr(parentDevice,"extCfgGroupLabel",type:"dt.entity.network:device"),
+          parentDeviceName=entityAttr(parentDevice,"entity.name",type:"dt.entity.network:device"),
+          ifAdminStatus, ifOperStatus, type
+
+          |filter ifAdminStatus == "up(1)" and ifOperStatus == "down(2)"'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 10
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["network"]}}'
+        states:
+          email_disk_report: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - email_disk_report
+    network_saturated_interfaces:
+      name: network_saturated_interfaces
+      input:
+        query: "//saturated interfaces: > 85% utilized\ntimeseries {\n    ifcBytesIn\
+          \ =  sum(com.dynatrace.extension.network_device.if.bytes_in.count, default:\
+          \ 0),\n    ifcBytesOut =  sum(com.dynatrace.extension.network_device.if.bytes_out.count,\
+          \ default: 0)\n  },\n  filter: isNotNull(`dt.entity.network:interface`),\n\
+          \  by:{ `dt.entity.network:device`, `dt.entity.network:interface`, if.speed},\
+          \ union:true\n  | fieldsAdd\n    ifcBytesInSum=arraySum(ifcBytesIn),\n \
+          \   ifcBytesOutSum=arraySum(ifcBytesOut),\n    ifSpeedInBytesPerMinute =\
+          \ ((toDouble(if.speed) * 1000000)/8)*60\n  | fieldsAdd ifcSaturation = ((arrayAvg(ifcBytesIn)\
+          \ + arrayAvg(ifcBytesOut))/(toDouble(interval) / 60000000000)) / ifSpeedInBytesPerMinute\n\
+          \  | fieldsAdd lastBitsInOutPerSecond = (arrayAvg(ifcBytesIn)+arrayAvg(ifcBytesOut))*8/(toDouble(interval)/1000000000)\n\
+          \  | fieldsAdd saturated=ifcSaturation >= 0.85\n  |filter saturated\n  |fields\
+          \ network_area=entityAttr(`dt.entity.network:device`,\"extCfgGroupLabel\"\
+          ),device=entityName(`dt.entity.network:device`), interface=entityName(`dt.entity.network:interface`),\
+          \ ifcSaturation, lastBitsInOutPerSecond"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 10
+      conditions:
+        else: SKIP
+        custom: '{{input()["scope"]["network"]}}'
+        states:
+          email_disk_report: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - email_disk_report

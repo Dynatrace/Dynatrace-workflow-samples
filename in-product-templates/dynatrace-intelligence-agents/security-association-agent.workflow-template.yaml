@@ -1,0 +1,855 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.email
+      version: ^1.9.0
+    - id: dynatrace.slack
+      version: ^3.4.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.slack:connection
+    targets:
+    - tasks.notify-in-slack.connection
+workflow:
+  title: Security Association Agent
+  description: ''
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: false
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            resource: true
+            slowdown: true
+            availability: true
+          entityTags: {}
+          customFilter: event.status_transition == "CREATED"
+          onProblemClose: false
+          entityTagsMatch: all
+          analysisReady: false
+  result: null
+  type: STANDARD
+  input:
+    ai-score.threshold: 69
+  hourlyExecutionLimit: 10
+  guide: '# Security Association Agent
+
+
+    Prioritize Davis problems with security context. This workflow analyzes the relationship
+    between problems and their related entities, and various detected security findings
+    on the corresponding entities.
+
+
+    # Prerequisites
+
+
+    * Dynatrace-native security capabilities for vulnerability, compliance, and attack
+    detection are enabled.
+
+    * Or, a supported [third-party security integration](https://docs.dynatrace.com/docs/shortlink/security-events-ingest)
+    is set up and ingests security findings into Dynatrace.
+
+
+    # How to Setup
+
+
+    1. During the template deployment select an existing Slack connection or create
+    a new one.
+
+    2. After the workflow deployment:
+
+    * Configure the recipient email in the [`notify-in-email`](?task=notify-in-email&tab=input)
+    task.
+
+    * Select the desired Slack channel in the [`notify-in-slack`](?task=notify-in-slack&tab=input)
+    task.
+
+    * Set the desired `ai-score.threshold` in the [Workflow options](?options=) `Default
+    input`. It will be used as the threshold for notifications (no notifications will
+    be sent if the score is below this threshold). Default: `70` (out of max `100`).
+
+    4. Enable the workflow trigger.
+
+
+    # Workflow flow
+
+
+    1. Workflow starts when a new Davis problem of `Resource`, `Slowdown` or `Availability`
+    type is detected.
+
+    2. Related entities of the problem are extracted, and security queries are contsructed.
+
+    3. Vulnerability, detection and compliance findings are queried.
+
+    4. The workflow summarizes the findings, analizes the probability of the problems
+    to be caused due to security issues, and generates a association score.
+
+    5. If the notification threshold (set previously) exceeded, the relevant stakeholders
+    are being notified in a Slack notification and an email.'
+  tasks:
+    notify-in-email:
+      name: notify-in-email
+      input:
+        cc: []
+        to:
+        - valeriy.leykin@dynatrace.com
+        bcc: []
+        content: '{{ (result("summarize-analysis").text | replace("\n","\\n") | from_json)["summary"]
+          | replace("\\n","\n")}}'
+        subject: An observability problem "{{event()["event.name"] }}" has been detected
+          with {{(result("summarize-analysis").text | replace("\n","\\n") | from_json)["score"]}}%
+          probability to be caused by security findings.
+      action: dynatrace.email:send-email
+      active: true
+      position:
+        x: 1
+        y: 4
+      conditions:
+        custom: '{{(result("summarize-analysis").text | replace("\n","\\n") | from_json)["score"]
+          | int > input()["ai-score.threshold"]}}'
+        states:
+          summarize-analysis: OK
+      description: Send email
+      predecessors:
+      - summarize-analysis
+    notify-in-slack:
+      name: notify-in-slack
+      input:
+        channel: C09UVT2K7JN
+        message: An observability problem "{{event()["event.name"] }}" has been detected
+          with {{(result("summarize-analysis").text | replace("\n","\\n") | from_json)["score"]}}%
+          probability to be caused by security findings.
+        reaction: []
+        attachment:
+          type: markdown
+          title: Attachment
+          content: '{{ (result("summarize-analysis").text | replace("\n","\\n") |
+            from_json)["summary"] | replace("\\n","\n")}}'
+          initialComment: ''
+        connection: ''
+        workflowID: '{{ execution().workflow.id }}'
+        channelType: id
+        executionID: '{{ execution().id }}'
+        executionDate: '{{ execution().started_at }}'
+        appendToThread: false
+        replyBroadcast: false
+        selectedRequestType: 2
+        attachmentToggleValue: file
+      action: dynatrace.slack:slack-send-message
+      active: true
+      position:
+        x: -1
+        y: 4
+      conditions:
+        custom: '{{(result("summarize-analysis").text | replace("\n","\\n") | from_json)["score"]
+          | int > input()["ai-score.threshold"]}}'
+        states:
+          summarize-analysis: OK
+      description: Send a message to a Slack workspace
+      predecessors:
+      - summarize-analysis
+    summarize-analysis:
+      name: summarize-analysis
+      input:
+        config: disabled
+        prompt: "You are given a Dynatrace Problem event and related security findings\
+          \ (vulnerabilities, detection alerts, compliance findings) in the input\
+          \ context. Your task is to analyze and summarize security risks related\
+          \ to the Problem and calculate an AI-association score (0–100%) representing\
+          \ the probability that security findings contributed to the Problem.\n\n\
+          ### Input placeholders (use exactly as provided):\n\n* Problem identifier:\
+          \ {{ event()[\"display_id\"] if \"display_id\" in event() else event()[\"\
+          displayId\"] }}\n* Problem link: {{environment().url}}/ui/apps/dynatrace.davis.problems/problem/{{event()[\"\
+          event.id\"]}}\n* Detection findings: from the context - Detection finding\
+          \ summary.\n* Vulnerability findings: from the context - Vulnerability finding\
+          \ summary. \n* Compliance findings: from the context - Compliance finding\
+          \ summary. \n\n### Primary goals\n\n1. Produce a clear, structured Markdown\
+          \ summary describing the problem, findings, relationships, and conclusions.\n\
+          2. Compute a single AI-association score (0–100) representing the assessed\
+          \ probability that the security findings contributed to the Davis problem.\
+          \ Start the summary with the score and an explanation of how you derived\
+          \ it.\n3. Output only a single-line JSON object with exactly two fields:\
+          \ { \"summary\": \"<markdown summary escaped as a single-line JSON string>\"\
+          , \"score\": \"<0-100>\" }\n\n### Analysis guidance (use these rules to\
+          \ compute the AI-association score and reasoning)\n\n* If no evidences from\
+          \ none of the type exist the association score should be 0%.\n* Consider\
+          \ detection findings strongest indicator; vulnerabilities and compliance\
+          \ weaker unless accompanied by detections.\n* If vulnerabilities exist but\
+          \ no detections or compliance, the score should be lower than when detections\
+          \ exist.\n* If compliance findings exist but no detections or vulnerabilities,\
+          \ keep score ≤ 50%.\n* Any detection present → minimum suggested score 70%.\n\
+          * Multiple detections → raise score > 80%.\n* If detection timestamps overlap\
+          \ the problem timeframe (compare dt.davis.last_reopen_timestamp or event.time),\
+          \ increase the score.\n* If there is no relationship between findings and\
+          \ the problem, report that and use a lower score.\n* Adjust (fine-tune)\
+          \ score by severity/risk of findings and by how closely affected entities\
+          \ match the problem entities (IDs, host names, k8s fields).\n* Explicitly\
+          \ mention timestamps and compare them against problem timestamps.\n* Where\
+          \ applicable, explain whether a vulnerability or misconfiguration could\
+          \ have led to the detection.\n\n\n### Required content and structure (Markdown)\n\
+          \n1. Header: AI-association score (0–100%) and brief explanation of score\
+          \ calculation.\n2. Problem summary:\n* Problem name and link (use the template\
+          \ above).\n* Problem timestamps (ISO format).\n* All known affected entities\
+          \ (full names and IDs where available). For each entity, include a clickable\
+          \ entity link when possible (see Entity links below).\n3. Findings summary:\
+          \ separate sections for\n* Vulnerabilities\n* Detection findings\n* Compliance\
+          \ findings\n\nFor each finding type:\n* Number of new findings by risk (critical,\
+          \ high, medium, low).\n* Number of affected entities per risk.\n* Link to\
+          \ Dynatrace Notebooks intent that lists these findings: {{environment().url}}/ui/intent/dynatrace.notebooks/view-query#{\"\
+          dt.query\":\"<query>\"} — URL must be URL-encoded as a single line string.\n\
+          * Top 5 findings: for each provide:\n-- Name\n-- Risk level\n-- Provider\n\
+          -- Number of affected entities + number of affected objects (if no entities)\n\
+          -- Top 5 affected entities (format: name (ID)) or affected objects if entities\
+          \ absent\n* Contribution assessment for this finding type to the Problem\
+          \ (Low / Med / High) and a percentage (with reasoning).\n\n4. Entity-focused\
+          \ summaries:\n* Table of top 5 affected entities with columns: entity name\
+          \ (ID), total vulnerability findings, total detection findings, total compliance\
+          \ findings (numbers).\n* Table of top 10 affected entities for critical/high\
+          \ risk counts across finding types.\n\n5. Cross-correlation & insights:\n\
+          * Do detection findings align with vulnerabilities/misconfigurations? Could\
+          \ a vulnerability/misconfiguration plausibly explain the detection? Provide\
+          \ evidence (matching entity IDs, k8s fields, host names).\n* Highlight findings\
+          \ that most likely contributed to the Problem (especially those with matching\
+          \ entity IDs, k8s, or host fields).\n\n6. Conclusion: concise recommendation\
+          \ and final AI-association score restated.\n\n### Entity links (construct\
+          \ clickable links when you include an entity):\n\n* host → {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Hosts?fullPageId=<host-id>\n\
+          * kubernetes node → {{environment().url}}/ui/apps/dynatrace.kubernetes/smartscape/K8S_NODE?detailsId=<k8s-node-id>\n\
+          * kubernetes cluster → {{environment().url}}/ui/apps/dynatrace.kubernetes/smartscape/K8S_CLUSTER?detailsId=<k8s-cluster-id>\n\
+          * ec2 instance → {{environment().url}}/ui/apps/dynatrace.clouds/smartscape?perspective=health&detailsId=<aws-ec2-id>\n\
+          * process group (instance) → {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Processes?perspective=Health&fullPageId=<pg-instance-id>\n\
+          Note: <host-id>,<k8s-node-id>, <k8s-cluster-id>, <aws-ec2-id>, <pg-instance-id>\
+          \ are just placeholders, which need to be replaced with the proper entity\
+          \ ID.\n\n### Formatting and technical rules\n\n* When listing entities mention\
+          \ the full names and (if available) the ids of the entities. Template: `name\
+          \ (id)`.\n* Output only a single-line JSON object and nothing else.\n* The\
+          \ JSON must have exactly two fields: \"summary\" and \"score\".\n* The value\
+          \ of \"summary\" must be a single markdown escaped string.\n* Use ISO timestamps\
+          \ in the escaped Markdown.\n* Example of correct output (single line):\n\
+          {\"summary\":\"# Problem\\nProblem details here.\\n- Item 1\\n- Item 2\"\
+          ,\"score\":\"72\"}\n* The JSON must be the only output (no surrounding ```\
+          \ or extra text). \n* Do not insert newlines inside the JSON; produce one\
+          \ flat line.\n\n\n### Examples (how to build an encoded notebooks intent\
+          \ link)\n\n* Query example (before encoding): {\"dt.query\":\"fetch dt.security.findings\
+          \ | filter type = 'vulnerability'\"}\n* Query should be appended after:\
+          \ {{environment().url}}/ui/intent/dynatrace.notebooks/view-query#"
+        autoTrim: false
+        instruction: ''
+        supplementary: '
+
+          ***************************
+
+          Input Davis problem event:
+
+          {{event()}}
+
+
+          ****************************
+
+          Vulnerability query:
+
+          {{result("generate-vulnerability-query")}}
+
+
+          Vulnerability finding summary:
+
+          {{result("execute-vulnerabilities-query").records}}
+
+
+          ***************************
+
+          Compliance query:
+
+          {{result("generate-compliance-query")}}
+
+
+          Compliance finding summary:
+
+          {{result("execute-compliance-query").records}}
+
+
+          *****************************
+
+          Detections query:
+
+          {{result("generate-detections-query")}}
+
+
+          Detection finding summary:
+
+          {{result("execute-detections-query").records}}
+
+
+          '
+      retry:
+        count: 2
+        delay: 45
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      active: true
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          execute-compliance-query: OK
+          execute-detections-query: OK
+          execute-vulnerabilities-query: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - execute-compliance-query
+      - execute-detections-query
+      - execute-vulnerabilities-query
+      customSampleResult:
+        text: '{ "score": "85","summary": "### AI-Association Score: 85%
+
+          The AI-association score is assessed at 85%, indicating a strong likelihood
+          that the security findings contributed to the Davis problem (P-2601676).
+          This is based on the presence of multiple detection findings within the
+          timeframe of the problem, combined with critical vulnerabilities and compliance
+          failures affecting the same entities.
+
+
+          ### Problem Summary
+
+          The Davis problem **P-2601676** is categorized as **CPU saturation** with
+          99.72% CPU usage. It affects the host entity **ip-10-178-55-40.ec2.internal
+          (HOST-2C9EA5900CEF6864)**, which is part of the Kubernetes cluster **fde74e4a-b1e1-41d7-b7ff-3a9b33e82985**.
+
+
+          ### Findings Summary
+
+          #### Vulnerabilities
+
+          - **Critical:** 2 findings affecting 2 entities.
+
+          - **High:** 1 finding affecting 8 entities.
+
+          - **Medium:** 1 finding affecting 7 entities.
+
+          - **Low:** 1 finding affecting 7 entities.
+
+          - **None:** 1 finding affecting 1 entity.
+
+          - **Intent URL:** [Vulnerability Findings](https://hau05752.sprint.apps.dynatracelabs.com/ui/intent/dynatrace.notebooks/view-query#%7B%22dt.query%22%3A%22fetch%20security.events%5Cn%7C%20filter%20event.type%3D%3D%5C%22VULNERABILITY_STATE_REPORT_EVENT%5C%22%5Cn%7C%20filter%20event.level%3D%3D%5C%22ENTITY%5C%22%5Cn%7C%20filter%20in%28dt.entity.host%2C%7B%5C%22HOST-2C9EA5900CEF6864%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28related_entities.hosts.ids%2C%7B%5C%22HOST-2C9EA5900CEF6864%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28related_entities.kubernetes_nodes.ids%2C%7B%5C%22KUBERNETES_NODE-A1FC336D84FB904D%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28related_entities.container_group_instances.ids%2C%7B%5C%22CONTAINER_GROUP_INSTANCE-BD0B4719CEAE9748%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28related_entities.services.ids%2C%7B%5C%22SERVICE-8A5087303379DBEA%5C%22%2C%20%5C%22SERVICE-971647E25F77F3DD%5C%22%2C%20%5C%22SERVICE-EC21CDC3560BB0B4%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28k8s.node.name%2C%20%7B%5C%22ip-10-178-55-40.ec2.internal%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28k8s.cluster.uid%2C%20%7B%5C%22fde74e4a-b1e1-41d7-b7ff-3a9b33e82985%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28host.name%2C%20%7B%5C%22ip-10-178-55-40.ec2.internal%5C%22%7D%29%5Cn%7C%20expand%20related_entities.kubernetes_clusters.id%3Drelated_entities.kubernetes_clusters.ids%5Cn%7C%20summarize%20by%3A%7BProvider%3Devent.provider%2C%20Risk%3Dvulnerability.risk.level%7D%2C%5Cn%7B%5Cn%20%20vulnerabilities%3DcollectDistinct%28vulnerability.title%29%2C%5Cn%20%20cves%3DarrayDistinct%28arrayFlatten%28collectDistinct%28vulnerability.references.cve%29%29%29%2C%5Cn%20%20affected_entities%3DcollectDistinct%28affected_entity.name%29%5Cn%7D%22%7D)
+
+
+          #### Compliance Findings
+
+          - **High:** 6 findings affecting 6 objects.
+
+          - **Medium:** 15 findings affecting 15 objects.
+
+          - **Low:** 2 findings affecting 2 objects.
+
+          - **Intent URL:** [Compliance Findings](https://hau05752.sprint.apps.dynatracelabs.com/ui/intent/dynatrace.notebooks/view-query#%7B%22dt.query%22%3A%22fetch%20security.events%5Cn%7C%20filter%20event.type%3D%3D%5C%22COMPLIANCE_FINDING%5C%22%5Cn%20%20%20%20%20and%20compliance.result.status.level%20%3D%3D%20%5C%22FAILED%5C%22%5Cn%7C%20filter%20in%28dt.entity.host%2C%7B%5C%22HOST-2C9EA5900CEF6864%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28k8s.node.name%2C%20%7B%5C%22ip-10-178-55-40.ec2.internal%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28k8s.cluster.uid%2C%20%7B%5C%22fde74e4a-b1e1-41d7-b7ff-3a9b33e82985%5C%22%7D%29%5Cn%7C%20fieldsAdd%20finding.title%20%3D%20coalesce%28finding.title%2C%20compliance.rule.title%29%2C%5Cn%20%20%20%20%20%20%20%20%20%20%20%20Risk%3Dcoalesce%28dt.security.risk.level%2Ccompliance.rule.severity.level%29%5Cn%7C%20fieldsAdd%20Provider%3Dcoalesce%28event.provider%2C%20product.vendor%29%5Cn%7C%20summarize%20by%3A%7BProvider%2C%20Risk%7D%2C%5Cn%7B%5Cn%20%20detections%3DcollectDistinct%28finding.title%29%2C%5Cn%20%20affected_object.names%3DcollectDistinct%28object.id%29%2C%5Cn%20%20affected_object.types%3DcollectDistinct%28object.type%29%5Cn%7D%5Cn%7C%20fieldsAdd%20count%3DarraySize%28detections%29%22%7D)
+
+
+          #### Detection Findings
+
+          - **High:** 2 findings affecting 2 objects.
+
+          - **Medium:** 1 finding affecting 1 object.
+
+          - **Intent URL:** [Detection Findings](https://hau05752.sprint.apps.dynatracelabs.com/ui/intent/dynatrace.notebooks/view-query#%7B%22dt.query%22%3A%22fetch%20security.events%5Cn%7C%20filter%20event.type%3D%3D%5C%22DETECTION_FINDING%5C%22%5Cn%7C%20fieldsAdd%20finding.time.created%3DtoTimestamp%28finding.time.created%29%5Cn%7C%20filter%20finding.time.created%20%3E%20toTimestamp%28%5C%222026-01-26T09%3A10%3A12.762000000Z%5C%22%29%20-%202h%5Cn%7C%20filter%20in%28dt.entity.host%2C%7B%5C%22HOST-2C9EA5900CEF6864%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28k8s.cluster.uid%2C%7B%5C%22fde74e4a-b1e1-41d7-b7ff-3a9b33e82985%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28k8s.node.name%2C%7B%5C%22ip-10-178-55-40.ec2.internal%5C%22%7D%29%5Cn%20%20%20%20%20or%20in%28host.name%2C%7B%5C%22ip-10-178-55-40.ec2.internal%5C%22%7D%29%5Cn%7C%20summarize%20by%3A%7BProvider%3Devent.provider%2C%20Risk%3Ddt.security.risk.level%7D%2C%5Cn%7B%5Cn%20%20detections%3DcollectDistinct%28finding.title%29%2C%5Cn%20%20affected_object.names%3DcollectDistinct%28object.name%29%2C%5Cn%20%20affected_object.types%3DcollectDistinct%28object.type%29%5Cn%7D%5Cn%7C%20fieldsAdd%20count%3DarraySize%28detections%29%22%7D)
+
+
+          ### Top 5 Affected Entities
+
+          | Entity Name (ID) | Vulnerabilities | Compliance | Detections |
+
+          |------------------|-----------------|------------|------------|
+
+          | ip-10-178-55-40.ec2.internal (HOST-2C9EA5900CEF6864) | 5 | 23 | 3 |
+
+          | Kubernetes cluster (fde74e4a-b1e1-41d7-b7ff-3a9b33e82985) | 4 | 15 | 2
+          |
+
+          | MembershipService.dll unguard-membership-service-* | 2 | 0 | 0 |
+
+          | SpringBoot org.dynatrace.ssrfservice.Application unguard-proxy-service-*
+          | 2 | 0 | 0 |
+
+          | SpringBoot org.dynatrace.microblog.Application unguard-microblog-service-*
+          | 2 | 0 | 0 |
+
+
+          ### Top 5 Findings
+
+          #### Vulnerabilities
+
+          1. **SQL injection at MembershipController+<GetMembershipStatus>d__3.MoveNext()**
+          (Critical) - Dynatrace - 2 entities.
+
+          2. **Remote Code Execution (RCE)** (Critical) - Dynatrace - 2 entities.
+
+          3. **Deserialization of Untrusted Data** (High) - Dynatrace - 8 entities.
+
+          4. **Denial of Service (DoS)** (High) - Dynatrace - 8 entities.
+
+          5. **Improper Input Validation** (Medium) - Dynatrace - 7 entities.
+
+
+          #### Compliance
+
+          1. **5.2.1 Prefer using dedicated EKS Service Accounts** (High) - Dynatrace
+          - 6 objects.
+
+          2. **4.4.1 Prefer using secrets as files over secrets as environment variables**
+          (High) - Dynatrace - 6 objects.
+
+          3. **4.3.2 Ensure that all Namespaces have Network Policies defined** (High)
+          - Dynatrace - 6 objects.
+
+          4. **4.1.4 Minimize access to create pods** (High) - Dynatrace - 6 objects.
+
+          5. **4.1.5 Ensure that default service accounts are not actively used**
+          (High) - Dynatrace - 6 objects.
+
+
+          #### Detections
+
+          1. **Trufflehog secret scanner executed** (High) - AutomationEngine - 1
+          object.
+
+          2. **Webserver executing reconnaissance commands** (High) - AutomationEngine
+          - 1 object.
+
+          3. **Kubernetes API new user agent by workload** (Medium) - AutomationEngine
+          - 1 object.
+
+
+          ### Contribution to Problem
+
+          - **Vulnerabilities:** Medium contribution (~30%). Critical vulnerabilities
+          such as SQL injection and RCE could lead to resource exhaustion.
+
+          - **Compliance:** Medium contribution (~25%). Misconfigurations like excessive
+          access to secrets and lack of network policies could exacerbate resource
+          contention.
+
+          - **Detections:** High contribution (~50%). Detection findings such as reconnaissance
+          commands and secret scanning directly indicate potential malicious activity
+          that could lead to CPU saturation.
+
+
+          ### Conclusion
+
+          The combination of critical vulnerabilities, compliance failures, and detection
+          findings strongly suggests a security-related root cause for the CPU saturation
+          problem. The detection findings, particularly those within the problem timeframe,
+          are the strongest indicators of a direct connection to the issue."}'
+    execute-compliance-query:
+      name: execute-compliance-query
+      input:
+        query: '{{result("generate-compliance-query").text}}'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 2
+      conditions:
+        states:
+          generate-compliance-query: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - generate-compliance-query
+    execute-detections-query:
+      name: execute-detections-query
+      input:
+        query: '{{result("generate-detections-query").text}}'
+      action: dynatrace.automations:execute-dql-query
+      active: true
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          generate-detections-query: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - generate-detections-query
+    generate-compliance-query:
+      name: generate-compliance-query
+      input:
+        config: dynatrace
+        prompt: 'Take a sample detections DQL query from the context and replace the
+          second filter section with filters for fields from the sample list of fields
+          provided in the context, using only the the relevant fields that exist in
+          the input event.
+
+          For example, if dt.entity.kubernetes_cluster is a field in the input event,
+          then the filter should be extended with OR in(dt.entity.kubernetes_cluster,{"KUBERNETES_CLUSTER-123",
+          "KUBERNETES_CLUSTER-124"}), while "KUBERNETES_CLUSTER-123" and "KUBERNETES_CLUSTER-124"
+          are the values extracted from the corresponding array in the event field:
+          dt.entity.kubernetes_cluster.
+
+          Another example, if k8s.cluster.uid is a field in the input Davis problem
+          event, then the filter should be extended with OR in(k8s.cluster.uid,{"3ad2565e-ba50-4a8f-98e9-603d19931e74",
+          "4ad2565e-ba50-4a8f-98e9-603d19931e74"}), while "3ad2565e-ba50-4a8f-98e9-603d19931e74"
+          and "4ad2565e-ba50-4a8f-98e9-603d19931e74" are the values extracted from
+          the corresponding array in the event field k8s.cluster.uid.
+
+          Keep the query structure and the final summary command as in the sample
+          query.
+
+
+          IMPORTANT: Output only the final string of the query starting with "fetch"
+          and ending with new line, without adding any other text to the output.
+
+          DO NOT add ``` and the unknown or plaintext string to the output.'
+        autoTrim: false
+        instruction: ''
+        supplementary: "**************************\nInput Davis problem event:\n**************************\n\
+          {{event()}}\n\n**************************\nSample fields to filter by:\n\
+          **************************\ndt.entity.kubernetes_cluster, dt.entity.kubernetes_node,\
+          \ dt.entity.container_group_instance, dt.entity.cloud_application_namespace,\
+          \ dt.entity.cloud_application, dt.entity.cloud_application_instance, dt.entity.host,\
+          \ dt.entity.process_group_instance,  dt.entity.service, dt.entity.service_instance,\n\
+          k8s.namespace.name, k8s.cluster.name, k8s.cluster.uid, k8s.node.name, k8s.container.name,\
+          \ k8s.workload.name, host.name\n\n******************\nSample compliance\
+          \ DQL query:\n*****************\nfetch security.events\n| filter event.type==\"\
+          COMPLIANCE_FINDING\"\n     and compliance.result.status.level == \"FAILED\"\
+          \n| filter in(dt.entity.kubernetes_cluster,{\"KUBERNETES_CLUSTER-B4A001031F545EE3\"\
+          })\n      or in(dt.entity.kubernetes_node,{\"KUBERNETES_NODE-4DE09774FEC152EF\"\
+          })\n      or in(dt.entity.container_group_instance,{\"CONTAINER_GROUP_INSTANCE-BD0B4719CEAE9748\"\
+          })\n      or in(dt.entity.cloud_application_namespace,{\"CLOUD_APPLICATION_NAMESPACE-D0C9B4C416395E8F\"\
+          })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-20AF84197FCAAA9B\"\
+          , \"CLOUD_APPLICATION-49801D78A6B4872C\", \"CLOUD_APPLICATION-49C1858A40B9BE64\"\
+          })\n      or in(dt.entity.cloud_application_instance,{\"CLOUD_APPLICATION_INSTANCE-C78EF720AE732D18\"\
+          })\n      or in(dt.entity.host,{\"HOST-DFEF8600D0A9854A\"})\n      or in(dt.entity.process_group_instance,{\"\
+          PROCESS_GROUP_INSTANCE-703DAF7E9E02153F\"})\n      or in(dt.entity.service,{\"\
+          SERVICE-8A5087303379DBEA\", \"SERVICE-971647E25F77F3DD\", \"SERVICE-EC21CDC3560BB0B4\"\
+          })\n      or in(dt.entity.service_instance,{\"SERVICE_INSTANCE-2B9854C896B127C7\"\
+          })\n      or in(k8s.namespace.name, {\"easytrade-live-debugger\"})\n   \
+          \   or in(k8s.cluster.name, {\"eks-live\"})\n      or in( k8s.cluster.uid,\
+          \ {\"8d179bf0-7549-46cf-99e5-1b903448e210\"})\n      or in(k8s.node.name,\
+          \ {\"ip-172-31-27-12.ec2.internal\"})\n      or in(k8s.container.name, {\"\
+          credit-card-order-service\"})\n      or in(k8s.workload.name, {\"credit-card-order-service\"\
+          , \"feature-flag-service\"})\n      or in(host.name, {\"ip-172-31-27-12.ec2.internal\"\
+          })\n| fieldsAdd finding.title = coalesce(finding.title, compliance.rule.title),\n\
+          \            Risk=coalesce(dt.security.risk.level,compliance.rule.severity.level)\n\
+          | fieldsAdd Provider=coalesce(event.provider, product.vendor)\n| summarize\
+          \ by:{Provider, Risk},\n{\n  detections=collectDistinct(finding.title),\n\
+          \  affected_object.names=collectDistinct(object.id),\n  affected_object.types=collectDistinct(object.type)\n\
+          }\n| fieldsAdd count=arraySize(detections)\n\n*******************\nEND OF\
+          \ SAMPLE QUERY\n*******************\n"
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      active: true
+      position:
+        x: -1
+        y: 1
+      description: Prompt the Dynatrace Intelligence generative AI
+      waitBefore: 20
+      predecessors: []
+    generate-detections-query:
+      name: generate-detections-query
+      input:
+        config: dynatrace
+        prompt: 'Take a sample detections DQL query from the context and replace the
+          second filter section with filters for fields from the sample list of fields
+          provided in the context, using only the the relevant fields that exist in
+          the input event.
+
+          For example, if dt.entity.kubernetes_cluster is a field in the input event,
+          then the filter should be extended with OR in(dt.entity.kubernetes_cluster,{"KUBERNETES_CLUSTER-123",
+          "KUBERNETES_CLUSTER-124"}), while "KUBERNETES_CLUSTER-123" and "KUBERNETES_CLUSTER-124"
+          are the values extracted from the corresponding array in the event field:
+          dt.entity.kubernetes_cluster.
+
+          Another example, if k8s.cluster.uid is a field in the input Davis problem
+          event, then the filter should be extended with OR in(k8s.cluster.uid,{"3ad2565e-ba50-4a8f-98e9-603d19931e74",
+          "4ad2565e-ba50-4a8f-98e9-603d19931e74"}), while "3ad2565e-ba50-4a8f-98e9-603d19931e74"
+          and "4ad2565e-ba50-4a8f-98e9-603d19931e74" are the values extracted from
+          the corresponding array in the event field k8s.cluster.uid.
+
+          Keep the query structure and the final summary command as in the sample
+          query.
+
+
+          Replace the timestamp value from this section "finding.time.created > toTimestamp("2025-08-21T04:31:52.202000000Z")
+          - 2h" with the min value out of (dt.davis.last_reopen_timestamp, timestamp
+          and event.time), which you need to choose without using any DQL function.
+
+
+          IMPORTANT: Output only the final string of the query starting with "fetch"
+          and ending with new line, without adding any other text to the output.
+
+          DO NOT add ``` and the unknown or plaintext string to the output.'
+        autoTrim: false
+        instruction: ''
+        supplementary: "**************************\nInput Davis problem event:\n**************************\n\
+          {{event()}}\n\n**************************\nSample fields to filter by:\n\
+          **************************\ndt.entity.kubernetes_cluster, dt.entity.kubernetes_node,\
+          \ dt.entity.container_group_instance, dt.entity.cloud_application_namespace,\
+          \ dt.entity.cloud_application, dt.entity.cloud_application_instance, dt.entity.host,\
+          \ dt.entity.process_group_instance,  dt.entity.service, dt.entity.service_instance,\n\
+          k8s.namespace.name, k8s.cluster.name, k8s.cluster.uid, k8s.node.name, k8s.container.name,\
+          \ k8s.workload.name, host.name\n\n******************\nSample detections\
+          \ DQL query:\n*****************\nfetch security.events\n| filter event.type==\"\
+          DETECTION_FINDING\"\n| fieldsAdd finding.time.created=toTimestamp(finding.time.created)\n\
+          | filter finding.time.created > toTimestamp(\"2025-08-21T04:31:52.202000000Z\"\
+          ) - 2h\n| filter in(dt.entity.kubernetes_cluster,{\"KUBERNETES_CLUSTER-B4A001031F545EE3\"\
+          })\n      or in(dt.entity.kubernetes_node,{\"KUBERNETES_NODE-4DE09774FEC152EF\"\
+          })\n      or in(dt.entity.container_group_instance,{\"CONTAINER_GROUP_INSTANCE-BD0B4719CEAE9748\"\
+          })\n      or in(dt.entity.cloud_application_namespace,{\"CLOUD_APPLICATION_NAMESPACE-D0C9B4C416395E8F\"\
+          })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-20AF84197FCAAA9B\"\
+          , \"CLOUD_APPLICATION-49801D78A6B4872C\", \"CLOUD_APPLICATION-49C1858A40B9BE64\"\
+          })\n      or in(dt.entity.cloud_application_instance,{\"CLOUD_APPLICATION_INSTANCE-C78EF720AE732D18\"\
+          })\n      or in(dt.entity.host,{\"HOST-DFEF8600D0A9854A\"})\n      or in(dt.entity.process_group_instance,{\"\
+          PROCESS_GROUP_INSTANCE-703DAF7E9E02153F\"})\n      or in(dt.entity.service,{\"\
+          SERVICE-8A5087303379DBEA\", \"SERVICE-971647E25F77F3DD\", \"SERVICE-EC21CDC3560BB0B4\"\
+          })\n      or in(dt.entity.service_instance,{\"SERVICE_INSTANCE-2B9854C896B127C7\"\
+          })\n      or in(k8s.namespace.name, {\"easytrade-live-debugger\"})\n   \
+          \   or in(k8s.cluster.name, {\"eks-live\"})\n      or in( k8s.cluster.uid,\
+          \ {\"8d179bf0-7549-46cf-99e5-1b903448e210\"})\n      or in(k8s.node.name,\
+          \ {\"ip-172-31-27-12.ec2.internal\"})\n      or in(k8s.container.name, {\"\
+          credit-card-order-service\"})\n      or in(k8s.workload.name, {\"credit-card-order-service\"\
+          , \"feature-flag-service\"})\n      or in(host.name, {\"ip-172-31-27-12.ec2.internal\"\
+          })\n| summarize by:{Provider=event.provider, Risk=dt.security.risk.level},\n\
+          {\n  detections=collectDistinct(finding.title),\n  times=collectDistinct(finding.time.created),\n\
+          \  affected_object.names=collectDistinct(object.name),\n  affected_object.types=collectDistinct(object.type)\n\
+          }\n| fieldsAdd count=arraySize(detections)\n*******************\nEND OF\
+          \ SAMPLE QUERY\n*******************"
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      active: true
+      position:
+        x: 0
+        y: 1
+      description: Prompt the Dynatrace Intelligence generative AI
+      waitBefore: 10
+      predecessors: []
+      customSampleResult:
+        text: "fetch security.events,from:now()-1d\n| filter event.type==\"DETECTION_FINDING\"\
+          \n| fieldsAdd finding.time.created=toTimestamp(finding.time.created)\n|\
+          \ filter finding.time.created > toTimestamp(\"2025-08-13T15:39:00.000Z\"\
+          )\n| filter in(dt.entity.kubernetes_cluster,{\"KUBERNETES_CLUSTER-B4A001031F545EE3\"\
+          })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-207455FA09CA1FD9\"\
+          })\n      or in(dt.entity.cloud_application_namespace,{\"CLOUD_APPLICATION_NAMESPACE-2E858F63FDF7306D\"\
+          })\n| summarize by:{object.id, object.name, davis_risk=dt.security.risk.level},\n\
+          {\n  detectionsNum=countDistinctExact(finding.id),\n  minTime=takeMin(finding.time.created),\n\
+          \  maxTime=takeMax(finding.time.created),\n  detections=collectDistinct(record(finding.title))\n\
+          }"
+        state:
+          history:
+          - role: user
+            text: 'Take a sample detections DQL query and replace the second filter
+              section with all the filters for dt.entity.* based options that exist
+              in the input event.
+
+              For example, if dt.entity.kubernetes_cluster is a field in the input
+              event, then the filter should be extended with OR in(dt.entity.kubernetes_cluster,{"KUBERNETES_CLUSTER-123",
+              "KUBERNETES_CLUSTER-124"}), while "KUBERNETES_CLUSTER-123" and "KUBERNETES_CLUSTER-124"
+              are the values extracted from the corresponding array in the event field:
+              dt.entity.kubernetes_cluster.
+
+              Another example, if k8s.namespace.name is a field in the input event,
+              then the filter shouldbe extended with OR in(k8s.namespace.name,{"cluster1",
+              "cluster2"}), while "cluster1" and "cluster2" are the values extracted
+              from the corresponding array in the event field: k8s.namespace.name
+
+              Keep the query structure and the final summary command.
+
+              Replace the timestamp value from this section "finding.time.created
+              > toTimestamp("2025-08-21T04:31:52.202000000Z")" with the min value
+              out of (dt.davis.last_reopen_timestamp, timestamp and event.time).
+
+
+              IMPORTANT: Output only the final string of the query starting with "fetch"
+              and ending with new line, without adding any other text to the output.
+
+              DO NOT add ``` and the unknown or plaintext strinf to the output.'
+          - role: ai
+            text: "fetch security.events,from:now()-1d\n| filter event.type==\"DETECTION_FINDING\"\
+              \n| fieldsAdd finding.time.created=toTimestamp(finding.time.created)\n\
+              | filter finding.time.created > toTimestamp(\"2025-08-13T15:39:00.000Z\"\
+              )\n| filter in(dt.entity.kubernetes_cluster,{\"KUBERNETES_CLUSTER-B4A001031F545EE3\"\
+              })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-207455FA09CA1FD9\"\
+              })\n      or in(dt.entity.cloud_application_namespace,{\"CLOUD_APPLICATION_NAMESPACE-2E858F63FDF7306D\"\
+              })\n| summarize by:{object.id, object.name, davis_risk=dt.security.risk.level},\n\
+              {\n  detectionsNum=countDistinctExact(finding.id),\n  minTime=takeMin(finding.time.created),\n\
+              \  maxTime=takeMax(finding.time.created),\n  detections=collectDistinct(record(finding.title))\n\
+              }"
+          version: '0.3'
+          skillName: recommender
+          conversationId: a72355a6-aea8-4cb1-b34e-5cd89106f4f9
+        status: SUCCESSFUL
+        metadata:
+          sources: []
+          notifications: []
+        messageToken: 341ae25c-385f-4d48-a48f-a078680ba7a0
+    generate-vulnerability-query:
+      name: generate-vulnerability-query
+      input:
+        config: dynatrace
+        prompt: 'Take a sample detections DQL query from the context and replace the
+          second filter section with filters for fields from the sample list of fields
+          provided in the context, using only the the relevant fields that exist in
+          the input event.
+
+          For example, if dt.entity.kubernetes_cluster is a field in the input event,
+          then the filter should be extended with OR in(dt.entity.kubernetes_cluster,{"KUBERNETES_CLUSTER-123",
+          "KUBERNETES_CLUSTER-124"}), while "KUBERNETES_CLUSTER-123" and "KUBERNETES_CLUSTER-124"
+          are the values extracted from the corresponding array in the event field:
+          dt.entity.kubernetes_cluster.
+
+          Another example, if k8s.cluster.uid is a field in the input Davis problem
+          event, then the filter should be extended with OR in(k8s.cluster.uid,{"3ad2565e-ba50-4a8f-98e9-603d19931e74",
+          "4ad2565e-ba50-4a8f-98e9-603d19931e74"}), while "3ad2565e-ba50-4a8f-98e9-603d19931e74"
+          and "4ad2565e-ba50-4a8f-98e9-603d19931e74" are the values extracted from
+          the corresponding array in the event field k8s.cluster.uid.
+
+          Keep the query structure and the final summary command as in the sample
+          query.
+
+
+          Note: Try to use `related_entities.*` filters as much as possible.
+
+          Note: `related_entities.kubernetes_workloads.ids` values are cloud applications,
+          such as: "CLOUD_APPLICATION-D25928D65DB8B3B7".
+
+
+          IMPORTANT: Output only the final string of the query starting with "fetch"
+          and ending with new line, without adding any other text to the output.
+
+          DO NOT add ``` and the unknown or plaintext string to the output.'
+        autoTrim: false
+        instruction: ''
+        supplementary: "**************************\nInput Davis problem event:\n**************************\n\
+          {{event()}}\n\n**************************\nSample fields to filter by:\n\
+          **************************\ndt.entity.kubernetes_cluster, dt.entity.kubernetes_node,\
+          \ dt.entity.container_group_instance, dt.entity.cloud_application_namespace,\
+          \ dt.entity.cloud_application, dt.entity.cloud_application_instance, dt.entity.host,\
+          \ dt.entity.process_group_instance,  dt.entity.service, dt.entity.service_instance,\n\
+          k8s.namespace.name, k8s.cluster.name, k8s.cluster.uid, k8s.node.name, k8s.container.name,\
+          \ k8s.workload.name, host.name, \nrelated_entities.kubernetes_workloads.ids,\
+          \ related_entities.kubernetes_nodes.ids, related_entities.container_group_instances.ids,\
+          \ related_entities.hosts.ids, related_entities.process_group_instances.ids,\
+          \ related_entities.services.ids\n\nNote: the full list should be taken from\
+          \ the template query.\n\n\n******************\nSample vulnerabilities DQL\
+          \ query:\n*****************\nfetch security.events\n| filter event.type==\"\
+          VULNERABILITY_STATE_REPORT_EVENT\"\n| filter event.level==\"ENTITY\"\n|\
+          \ filter in(dt.entity.container_group_instance,{\"CONTAINER_GROUP_INSTANCE-BD0B4719CEAE9748\"\
+          })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-20AF84197FCAAA9B\"\
+          , \"CLOUD_APPLICATION-49801D78A6B4872C\", \"CLOUD_APPLICATION-49C1858A40B9BE64\"\
+          })\n      or in(dt.entity.cloud_application_instance,{\"CLOUD_APPLICATION_INSTANCE-C78EF720AE732D18\"\
+          })\n      or in(dt.entity.host,{\"HOST-DFEF8600D0A9854A\"})\n      or in(dt.entity.process_group_instance,{\"\
+          PROCESS_GROUP_INSTANCE-703DAF7E9E02153F\"})\n      or in(dt.entity.service,{\"\
+          SERVICE-8A5087303379DBEA\", \"SERVICE-971647E25F77F3DD\", \"SERVICE-EC21CDC3560BB0B4\"\
+          })\n      or in(dt.entity.service_instance,{\"SERVICE_INSTANCE-2B9854C896B127C7\"\
+          })\nOR\n      in(related_entities.kubernetes_workloads.ids,{\"CLOUD_APPLICATION-D25928D65DB8B3B7\"\
+          })\n      or in(related_entities.kubernetes_nodes.ids,{\"KUBERNETES_NODE-4DE09774FEC152EF\"\
+          })\n      or in(related_entities.container_group_instances.ids,{\"CONTAINER_GROUP_INSTANCE-BD0B4719CEAE9748\"\
+          })\n      or in(related_entities.hosts.ids,{\"HOST-DFEF8600D0A9854A\"})\n\
+          \      or in(related_entities.process_group_instances.ids,{\"PROCESS_GROUP_INSTANCE-703DAF7E9E02153F\"\
+          })\n      or in(related_entities.services.ids,{\"SERVICE-8A5087303379DBEA\"\
+          , \"SERVICE-971647E25F77F3DD\", \"SERVICE-EC21CDC3560BB0B4\"})\n      or\
+          \ in(related_entities.service_instances.ids,{\"SERVICE_INSTANCE-2B9854C896B127C7\"\
+          })\n      or in(affected_entity.reachable_data_assets.ids,{\"SERVICE-8A5087303379DBEA\"\
+          , \"SERVICE-971647E25F77F3DD\", \"SERVICE-EC21CDC3560BB0B4\"})\nOR    in(k8s.node.name,\
+          \ {\"ip-172-31-27-12.ec2.internal\"})\n      or in(k8s.container.name, {\"\
+          credit-card-order-service\"})\n      or in(k8s.workload.name, {\"credit-card-order-service\"\
+          , \"feature-flag-service\"})\n      or in(host.name, {\"ip-172-31-27-12.ec2.internal\"\
+          })\n| expand related_entities.kubernetes_clusters.id=related_entities.kubernetes_clusters.ids\n\
+          | summarize by:{Provider=event.provider, Risk=vulnerability.risk.level},\n\
+          {\n  vulnerabilities=collectDistinct(vulnerability.title),\n  cves=arrayDistinct(arrayFlatten(collectDistinct(vulnerability.references.cve))),\n\
+          \  affected_entities=collectDistinct(affected_entity.name)\n}\n*******************\n\
+          END OF SAMPLE QUERY\n*******************\n"
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      active: true
+      position:
+        x: 1
+        y: 1
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors: []
+      customSampleResult:
+        text: "fetch security.events, from:now()-2h\n| filter event.type==\"VULNERABILITY_STATE_REPORT_EVENT\"\
+          \n| filter in(dt.entity.kubernetes_cluster,{\"KUBERNETES_CLUSTER-B4A001031F545EE3\"\
+          })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-207455FA09CA1FD9\"\
+          })\n      or in(dt.entity.cloud_application_namespace,{\"CLOUD_APPLICATION_NAMESPACE-2E858F63FDF7306D\"\
+          })\n| summarize by:{dt.source_entity=affected_entity.id, affected_entity.name,\
+          \ davis_risk=vulnerability.davis_assessment.level},\n{\n vulnerabilitiesCount=countDistinctExact(vulnerability.id),\n\
+          \ vulnerabilities=collectDistinct(vulnerability.title),\n CVEs=arrayDistinct(arrayFlatten(collectDistinct(vulnerability.references.cve))),\n\
+          \ vulnerable_components=collectDistinct(affected_entity.vulnerable_component.package_name)\n\
+          }"
+        state:
+          history:
+          - role: user
+            text: 'Take a sample vulnerabilities DQL query and replace the second
+              filter section with all the filters for dt.entity.* based options that
+              exist in the input event.
+
+              For example, if dt.entity.kubernetes_cluster is a field in the input
+              event, then the filter should be extended with OR in(dt.entity.kubernetes_cluster,{"KUBERNETES_CLUSTER-123",
+              "KUBERNETES_CLUSTER-124"}), while "KUBERNETES_CLUSTER-123" and "KUBERNETES_CLUSTER-124"
+              are the values extracted from the corresponding array in the event field:
+              dt.entity.kubernetes_cluster.
+
+              Another example, if k8s.namespace.name is a field in the input event,
+              then the filter shouldbe extended with OR in(k8s.namespace.name,{"cluster1",
+              "cluster2"}), while "cluster1" and "cluster2" are the values extracted
+              from the corresponding array in the event field: k8s.namespace.name
+
+              Keep the query structure and the final summary command.
+
+
+              IMPORTANT: Output only the final string of the query starting with "fetch"
+              and ending with new line, without adding any other text to the output.
+
+              DO NOT add ``` and the unknown or plaintext strinf to the output.'
+          - role: ai
+            text: "fetch security.events, from:now()-2h\n| filter event.type==\"VULNERABILITY_STATE_REPORT_EVENT\"\
+              \n| filter in(dt.entity.kubernetes_cluster,{\"KUBERNETES_CLUSTER-B4A001031F545EE3\"\
+              })\n      or in(dt.entity.cloud_application,{\"CLOUD_APPLICATION-207455FA09CA1FD9\"\
+              })\n      or in(dt.entity.cloud_application_namespace,{\"CLOUD_APPLICATION_NAMESPACE-2E858F63FDF7306D\"\
+              })\n| summarize by:{dt.source_entity=affected_entity.id, affected_entity.name,\
+              \ davis_risk=vulnerability.davis_assessment.level},\n{\n vulnerabilitiesCount=countDistinctExact(vulnerability.id),\n\
+              \ vulnerabilities=collectDistinct(vulnerability.title),\n CVEs=arrayDistinct(arrayFlatten(collectDistinct(vulnerability.references.cve))),\n\
+              \ vulnerable_components=collectDistinct(affected_entity.vulnerable_component.package_name)\n\
+              }"
+          version: '0.3'
+          skillName: recommender
+          conversationId: 48424ade-642a-4888-8c90-137a9d71e047
+        status: SUCCESSFUL
+        metadata:
+          sources:
+          - url: https://docs.dynatrace.com/docs/secure/use-cases/security-reporting
+            type: Documentation
+            title: Security data analysis and reporting
+          - url: https://docs.dynatrace.com/docs/secure/threat-observability/dql-examples
+            type: Documentation
+            title: DQL examples for security data
+          notifications: []
+        messageToken: f6c2ba02-bb8a-400a-8b79-839607a22690
+    execute-vulnerabilities-query:
+      name: execute-vulnerabilities-query
+      input:
+        query: '{{result("generate-vulnerability-query").text}}'
+      action: dynatrace.automations:execute-dql-query
+      active: true
+      position:
+        x: 1
+        y: 2
+      conditions:
+        states:
+          generate-vulnerability-query: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - generate-vulnerability-query

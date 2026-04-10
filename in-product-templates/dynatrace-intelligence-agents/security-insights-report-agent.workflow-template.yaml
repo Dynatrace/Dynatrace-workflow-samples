@@ -1,0 +1,285 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.email
+      version: ^1.9.0
+  inputs: []
+workflow:
+  title: Security Insights Report Agent
+  description: ''
+  schemaVersion: 4
+  trigger:
+    schedule:
+      isActive: false
+      trigger:
+        cron: 0 8 * * 1
+        type: cron
+      filterParameters: {}
+      timezone: UTC
+      inputs: {}
+  result: null
+  type: STANDARD
+  input:
+    risk.levels:
+    - CRITICAL
+  hourlyExecutionLimit: 10
+  guide: '# Security Insights Report Agent
+
+
+    Create an automated periodic security report of the top new security findings
+    and their impact on your environment. This workflow analyzes vulnerability, detection,
+    and compliance findings to generate a comprehensive email report.
+
+
+    # Prerequisites
+
+
+    * Dynatrace-native security capabilities for vulnerability, compliance, and attack
+    detection are enabled.
+
+    * Or, a supported [third-party security integration](https://docs.dynatrace.com/docs/shortlink/security-events-ingest)
+    is set up and ingests security findings into Dynatrace.
+
+
+    # How to Setup
+
+
+    1. After the workflow deployment, configure the recipient email in the [Send email
+    action](?task=send-email&tab=input).
+
+    2. Select the risk levels to report on by updating the values in the [Workflow
+    options](?options=) `Default input`.
+
+    3. Enable the workflow trigger (optional, adjust the schedule).
+
+
+    # Workflow flow
+
+
+    1. Workflow is triggered on a weekly basis (can be customized in the trigger configuration).
+
+    2. New top risk vulnerability, detection and compliance findings from the last
+    week are fetched from Grail.
+
+    3. A comprehensive report about new security findings is generated and sent in
+    an email.'
+  tasks:
+    send-email:
+      name: send-email
+      input:
+        cc: []
+        to:
+        - valeriy.leykin@dynatrace.com
+        bcc: []
+        content: '{{result("generate-report").text}}'
+        subject: Weekly security digest
+      action: dynatrace.email:send-email
+      active: true
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          generate-report: OK
+      description: Send email
+      predecessors:
+      - generate-report
+    generate-report:
+      name: generate-report
+      input:
+        config: disabled
+        prompt: 'Generate an executive summary report to be sent in an email with
+          the new vulnerabilities, detections and compliance findings  reported in
+          the last week.
+
+          Prepare the report as an email with an intro and final part reporting on
+          behalf of Dynatrace Platform, addressing dear Dynatrace User.
+
+
+          ## Output guidance
+
+          * Start with a summary per category: vulnerabilities, detection, compliance
+          findings; providing number of new findings by risk and number of affected
+          entities per risk.
+
+          * For each category generate a link for Dynatrace intent call to open Notebooks
+          app with a query for the corresponding findings:
+
+          -- Sample intent URL is: {{environment().url}}/ui/intent/dynatrace.notebooks/view-query#{"dt.query":"<here
+          goes query>"}
+
+          -- Replace the "<here goes query>" from the URL with the appropriate query
+          from the context for vulnerabilities, detections or compliance findings.
+
+          -- IMPORTANT: encode the URLs.
+
+          * Then, summarize how many affected entities have findings per risk (critical,
+          high, etc.; only if the corresponding risk exists), adding a table of top
+          10 affected entities with a column for each category (vulnerability, detection,
+          compliance) total findings affecting this entity.
+
+          * Then, list the top 5 findings for each category, including:
+
+          -- Name of the finding
+
+          -- Risk level
+
+          -- Provider
+
+          -- Number of affected entities plus affected objects (in case there are
+          no entities)
+
+          -- Top 5 affected entities (name(ID)) or the affected objects (in case no
+          entities)
+
+
+          Note: when an entity mentioned, try to add a link to the entity name(id):
+
+          ## Entity links
+
+          * host --> {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Hosts?fullPageId=<host-id>
+
+          * kubernetes node --> {{environment().url}}/ui/apps/dynatrace.kubernetes/smartscape/K8S_NODE?detailsId=<k8s-node-id>
+
+          * kubernetes cluster --> {{environment().url}}/ui/apps/dynatrace.kubernetes/smartscape/K8S_CLUSTER?detailsId=<k8s-cluster-id>
+
+          * ec2 instance --> {{environment().url}}/ui/apps/dynatrace.clouds/smartscape?perspective=health&detailsId=<aws-ec2-id>
+
+          * process group instance --> {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Processes?perspective=Health&fullPageId=<process-group-instance-id>
+
+          * process group --> {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Processes?filtering=%22Process+group+id%22+%3D+<process-group-id>
+
+          Note: <host-id>,<k8s-node-id>, <k8s-cluster-id>, <aws-ec2-id>, <process-group-instance-id>,
+          <pg-id> are just placeholders, which need to be replaced with the proper
+          entity ID.
+
+
+          Do not include any prefix ```, and do not include ``` a the end of the text.
+
+          Use tables to list information.'
+        autoTrim: false
+        instruction: ''
+        supplementary: '# Vulnerability findings query
+
+          {{result("query-vulnerability-findings")["metadata"]["grail"]["query"] |
+          replace(''\n'', ''\\n'')}}
+
+
+          # Detection findings query
+
+          {{result("query-detection-findings")["metadata"]["grail"]["query"] | replace(''\n'',
+          ''\\n'')}}
+
+
+          # Compliance findings query
+
+          {{result("query-compliance-findings")["metadata"]["grail"]["query"] | replace(''\n'',
+          ''\\n'')}}
+
+
+          ## Vulnerability findings records
+
+          {{result("query-vulnerability-findings").records}}
+
+
+          ## Detection findings records
+
+          {{result("query-detection-findings").records}}
+
+
+          ## Compliance findings records
+
+          {{result("query-compliance-findings").records}}'
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          query-detection-findings: OK
+          query-compliance-findings: OK
+          query-vulnerability-findings: OK
+      description: Prompt the Dynatrace Intlligence generative AI
+      predecessors:
+      - query-vulnerability-findings
+      - query-detection-findings
+      - query-compliance-findings
+    query-detection-findings:
+      name: query-detection-findings
+      input:
+        query: "fetch security.events, from:now()-7d\n| filter event.type==\"DETECTION_FINDING\"\
+          \n     AND in(dt.security.risk.level,{{\"{\\\"\" + input()[\"risk.levels\"\
+          ] | join('\", \"') + \"\\\"}\"}})\n| summarize by:{Provider=event.provider,\
+          \ Risk=dt.security.risk.level},\n{\n  detections=collectDistinct(finding.title),\n\
+          \  affected_object.names=collectDistinct(object.name),\n  affected_object.types=collectDistinct(object.type),\n\
+          \  affected_entity.ids=collectDistinct(dt.smartscape_source.id)\n}\n| fieldsAdd\
+          \ count=arraySize(detections)"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    query-compliance-findings:
+      name: query-compliance-findings
+      input:
+        query: "fetch security.events, from:-3h\n| filter event.type == \"COMPLIANCE_FINDING\"\
+          \n     and compliance.result.status.level == \"FAILED\"\n| fieldsAdd finding.title\
+          \ = coalesce(finding.title, compliance.rule.title),\n            Risk=coalesce(dt.security.risk.level,compliance.rule.severity.level),\n\
+          \            uniqueID=concat(dt.source_entity,\":\",finding.title)\n| filter\
+          \ in(Risk, {{\"{\\\"\" + input()[\"risk.levels\"] | join('\", \"') + \"\\\
+          \"}\"}})\n// fetch previous findings to filter only new ones\n| join kind:leftOuter,\
+          \ [\n  fetch security.events, from:-7d-3h, to:-7d\n  | filter event.type\
+          \ == \"COMPLIANCE_FINDING\"\n       and compliance.result.status.level ==\
+          \ \"FAILED\"\n  | fieldsAdd finding.title = coalesce(finding.title, compliance.rule.title),\n\
+          \              Risk=coalesce(dt.security.risk.level,compliance.rule.severity.level),\n\
+          \              uniqueID=concat(dt.source_entity,\":\",finding.title)\n \
+          \ | filter in(Risk, {{\"{\\\"\" + input()[\"risk.levels\"] | join('\", \"\
+          ') + \"\\\"}\"}})\n], on:{uniqueID}, fields:{matched.uniqueID=uniqueID}\n\
+          | filter isNull(matched.uniqueID)\n| fieldsAdd Provider=coalesce(event.provider,\
+          \ product.vendor)\n| summarize by:{Provider, Risk},\n{\n  detections=collectDistinct(finding.title),\n\
+          \  affected_object.names=collectDistinct(object.id),\n  affected_object.types=collectDistinct(object.type),\n\
+          \  affected_entity.ids=collectDistinct(dt.smartscape_source.id)\n}\n| fieldsAdd\
+          \ count=arraySize(detections)"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    query-vulnerability-findings:
+      name: query-vulnerability-findings
+      input:
+        query: "fetch security.events, from:now()-7d\n| filter dt.system.bucket==\"\
+          default_securityevents_builtin\"\n     AND event.provider==\"Dynatrace\"\
+          \n     AND event.type==\"VULNERABILITY_STATE_REPORT_EVENT\"\n     AND event.level==\"\
+          ENTITY\"\n     AND in(vulnerability.risk.level,{{\"{\\\"\" + input()[\"\
+          risk.levels\"] | join('\", \"') + \"\\\"}\"}})\n// filter for the latest\
+          \ snapshot per entity\n| dedup {vulnerability.display_id, affected_entity.id},\
+          \ sort:{timestamp desc}\n// filter for open non-muted vulnerabilities\n\
+          | filter vulnerability.resolution.status==\"OPEN\"\n     AND vulnerability.parent.mute.status!=\"\
+          MUTED\"\n     AND vulnerability.mute.status!=\"MUTED\"\n// filter only last\
+          \ week new vulnerabilities\n| filter vulnerability.resolution.change_date\
+          \ > now()-7d\n| summarize by:{Provider=event.provider, Risk=vulnerability.risk.level},\n\
+          {\n  vulnerabilities=collectDistinct(vulnerability.title),\n  affected_entity.names=collectDistinct(affected_entity.name),\n\
+          \  affected_entity.ids=collectDistinct(affected_entity.id)\n}\n| fieldsAdd\
+          \ count=arraySize(vulnerabilities)\n| append [\n  fetch security.events,\
+          \ from:now()-7d\n  | filter event.type==\"VULNERABILITY_FINDING\"\n    \
+          \   AND in(dt.security.risk.level,{{\"{\\\"\" + input()[\"risk.levels\"\
+          ] | join('\", \"') + \"\\\"}\"}})\n  | filterOut event.provider==\"OneAgent\"\
+          \ or product.vendor==\"Dynatrace\"\n  | filter finding.time.created > now()-7d\n\
+          \  | fieldsAdd Provider=coalesce(event.provider, product.vendor)\n  | summarize\
+          \ by:{Provider, Risk=dt.security.risk.level},\n  {\n    vulnerabilities=collectDistinct(vulnerability.title),\n\
+          \    affected_object.names=collectDistinct(object.name),\n    affected_object.types=collectDistinct(object.type)\n\
+          \  }\n  | fieldsAdd count=arraySize(vulnerabilities)\n]"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []

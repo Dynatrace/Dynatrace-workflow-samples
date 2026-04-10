@@ -1,0 +1,109 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.text.processing
+      version: ^1.1.0
+  inputs: []
+workflow:
+  title: Get and set image version in YAML
+  description: ''
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Get and set image version in YAML\n\nThis workflow showcases how to use\
+    \ the Text processing app to read and update an image version in a Kubernetes\
+    \ Pod YAML. It uses one task to extract the image value from the YAML and another\
+    \ task to modify that value.\n\n# Setup\n\nThe Text processing app does not require\
+    \ any external connections.\n\nYou only need to provide the YAML content you want\
+    \ to work with in the respective tasks.\n\n# Trigger\n\nBy default, this workflow\
+    \ uses an on-demand [trigger](?trigger=). You can leave it as-is to run the workflow\
+    \ manually or via API.\n\nYou can also update the trigger to run on a schedule\
+    \ (for example, daily or weekly) or to start from another workflow, depending\
+    \ on how you want to automate your YAML processing.\n\n# Get the version of an\
+    \ image\n\nThe task [get_version_of_an_image](?task=get_version_of_an_image&tab=input)\
+    \ demonstrates how to read a value from a YAML file using the **Get YAML value**\
+    \ action.\n\nConfigure the task as follows:\n\n1. **YAML content**\n   Paste or\
+    \ provide the full YAML you want to inspect, for example a Pod specification:\n\
+    \   ```yaml\n   apiVersion: v1\n   kind: Pod\n   metadata:\n     name: my-app-pod\n\
+    \     labels:\n       app: my-app\n       environment: production\n   spec:\n\
+    \     containers:\n       - name: nginx-container\n         image: nginx:1.25.3\n\
+    \         ports:\n           - containerPort: 80\n   ```\n\n2. **Document index**\n\
+    \   Keep the default `0` if your YAML contains a single document.\n\n3. **Path**\n\
+    \   Set the path to the property you want to read.\n   In this example, the image\
+    \ field of the first container:\n   ```code\n   .spec.containers[0].image\n  \
+    \ ```\n\nThe task returns the image value (for example, `nginx:1.25.3`), which\
+    \ you can use in later steps of the workflow.\n\n# Adjust the version of an image\n\
+    \nThe task [adjust_version_of_an_image](?task=adjust_version_of_an_image&tab=input)\
+    \ demonstrates how to update a value in a YAML file using the **Set YAML value**\
+    \ action.\n\nConfigure the task as follows:\n\n1. **YAML content**\n   Provide\
+    \ the YAML you want to modify. You can:\n   - Paste the same Pod YAML as in the\
+    \ previous task, or\n   - Use the output of a previous task that supplies YAML\
+    \ content.\n\n2. **Document index**\n   Keep the default `0` for a single-document\
+    \ YAML.\n\n3. **Path**\n   Use the same path as in the read example to target\
+    \ the image field:\n   ```code\n   .spec.containers[0].image\n   ```\n\n4. **Value**\n\
+    \   Set the new image value you want to write, for example:\n   ```code\n   nginx:1.25.4\n\
+    \   ```\n\nThe task updates the YAML at the specified path and returns the modified\
+    \ YAML, which you can use in downstream tasks (for example, to store the file\
+    \ or submit it to another system).\n\n# Customization examples\n\nYou can adapt\
+    \ this workflow to other YAML-based use cases:\n\n1. **Target a different container**\n\
+    \   Update the path to point to another container in the list, for example:\n\
+    \   ```code\n   .spec.containers[1].image\n   ```\n\n2. **Modify other properties**\n\
+    \   Use the same pattern to read or update any YAML field, such as:\n   ```code\n\
+    \   .metadata.labels.environment\n   .spec.replicas\n   ```\n\nThis template is\
+    \ intended as a simple reference to learn how to get and set values in YAML with\
+    \ the Text processing app and can be extended to match your own deployment and\
+    \ configuration workflows."
+  tasks:
+    get_version_of_an_image:
+      name: get_version_of_an_image
+      input:
+        path: .spec.containers[0].image
+        yaml: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: my-app-pod\n  labels:\n\
+          \    app: my-app\n    environment: production\nspec:\n  containers:\n  -\
+          \ name: nginx-container\n    image: nginx:1.25.3\n    ports:\n    - containerPort:\
+          \ 80\n      protocol: TCP\n    resources:\n      requests:\n        memory:\
+          \ \"64Mi\"\n        cpu: \"250m\"\n      limits:\n        memory: \"128Mi\"\
+          \n        cpu: \"500m\"\n    volumeMounts:\n    - name: shared-data\n  \
+          \    mountPath: /usr/share/nginx/html\n\n  - name: app-container\n    image:\
+          \ python:3.11-slim\n    command: [\"python\", \"-m\", \"http.server\", \"\
+          8080\"]\n    ports:\n    - containerPort: 8080\n      protocol: TCP\n  \
+          \  env:\n    - name: ENVIRONMENT\n      value: \"production\"\n    resources:\n\
+          \      requests:\n        memory: \"128Mi\"\n        cpu: \"250m\"\n   \
+          \   limits:\n        memory: \"256Mi\"\n        cpu: \"500m\"\n    volumeMounts:\n\
+          \    - name: shared-data\n      mountPath: /data\n\n  volumes:\n  - name:\
+          \ shared-data\n    emptyDir: {}\n  restartPolicy: Always\n"
+      action: dynatrace.text.processing:get-yaml-value
+      position:
+        x: -1
+        y: 1
+      description: Retrieves a value from a YAML file
+      predecessors: []
+    adjust_version_of_an_image:
+      name: adjust_version_of_an_image
+      input:
+        path: .spec.containers[0].image
+        yaml: "apiVersion: v1\nkind: Pod\nmetadata:\n  name: my-app-pod\n  labels:\n\
+          \    app: my-app\n    environment: production\nspec:\n  containers:\n  -\
+          \ name: nginx-container\n    image: nginx:1.25.3\n    ports:\n    - containerPort:\
+          \ 80\n      protocol: TCP\n    resources:\n      requests:\n        memory:\
+          \ \"64Mi\"\n        cpu: \"250m\"\n      limits:\n        memory: \"128Mi\"\
+          \n        cpu: \"500m\"\n    volumeMounts:\n    - name: shared-data\n  \
+          \    mountPath: /usr/share/nginx/html\n\n  - name: app-container\n    image:\
+          \ python:3.11-slim\n    command: [\"python\", \"-m\", \"http.server\", \"\
+          8080\"]\n    ports:\n    - containerPort: 8080\n      protocol: TCP\n  \
+          \  env:\n    - name: ENVIRONMENT\n      value: \"production\"\n    resources:\n\
+          \      requests:\n        memory: \"128Mi\"\n        cpu: \"250m\"\n   \
+          \   limits:\n        memory: \"256Mi\"\n        cpu: \"500m\"\n    volumeMounts:\n\
+          \    - name: shared-data\n      mountPath: /data\n\n  volumes:\n  - name:\
+          \ shared-data\n    emptyDir: {}\n  restartPolicy: Always\n"
+        value: nginx:1.25.4
+      action: dynatrace.text.processing:set-yaml-value
+      position:
+        x: 1
+        y: 1
+      description: Manipulates a YAML
+      predecessors: []

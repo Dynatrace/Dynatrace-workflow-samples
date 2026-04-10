@@ -1,0 +1,109 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+  inputs: []
+workflow:
+  title: 06_Handle AWS DevOps Agent mitigation responses
+  description: version=v9,cid=051f4c9ffc08d1bcf9ee4115a8f6cb1bcb68040f
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: event
+        value:
+          query: not isNull(problemEventId) and eventType == "JOURNAL_RECORD_CREATED"
+            and matchesPhrase(journalRecord, "\"record_type\":\"mitigation_summary\"")
+          eventType: events
+  result: null
+  type: STANDARD
+  input:
+    updateTSGNotebooks: false
+  hourlyExecutionLimit: 50
+  guide: The workflow processes AWS DevOps Agent results and stores them in Dynatrace.
+    Use the dashboard `07_Display AWS DevOps Agent investigation results` to see those.
+  tasks:
+    attach_mitigation:
+      name: attach_mitigation
+      input:
+        script: "import { eventsClient, problemsClient, EventIngestEventType } from\
+          \ \"@dynatrace-sdk/client-classic-environment-v2\";\nimport { execution\
+          \ } from '@dynatrace-sdk/automation-utils';\nimport { documentsClient }\
+          \ from \"@dynatrace-sdk/client-document\";\n\nfunction generateGUID() {\n\
+          \    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function\
+          \ (c) {\n        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r\
+          \ & 0x3 | 0x8);\n        return v.toString(16);\n    });\n}\n\nfunction\
+          \ createTSGNodebookId(problemId, taskId) {\n  return `problem-TSG-${problemId}-${taskId.substring(0,\
+          \ 10)}`.substring(0, 100).replaceAll(\"_\", \"-\");\n}\n\nfunction mitigation_summary2Str(mitigation_summary)\
+          \ {\n  const { action, reasoning } = mitigation_summary\n  return `####\
+          \ Action\\n${action}\\n#### Reasoning\\n${reasoning}`\n}\n\nfunction execution_plans2Str(execution_plans)\
+          \ {\n  return execution_plans.map(e => {\n    const { step, instructions\
+          \ } = e\n    return `#### ${step}\\n` + instructions.map(i => `\\`\\`\\\
+          `${i.instruction.content} (${i.instruction.type})\\`\\`\\`\\n\\n${i.reasoning.purpose}${(i.reasoning.risks\
+          \ != undefined && i.reasoning.risks != '') ? '\\n##### Risks\\n'+i.reasoning.risks\
+          \ : ''}${(i.reasoning.advisory != undefined && i.reasoning.advisory != '')\
+          \ ? '\\n##### Advisory\\n'+i.reasoning.advisory : ''}`).join('\\n\\n')\n\
+          \  }).join('\\n\\n')\n}\n\nfunction trimIfTooLong(val) {\n  if (val.length\
+          \ > 4000) {\n    return val.substring(0, 4000) + \"... trimmed please use\
+          \ AWS DevOps App\"\n  }\n  return val\n}\n\nasync function updateExistingTSG(existingDocumentId,\
+          \ newSectionsContent) {\n  if (newSectionsContent && newSectionsContent.length\
+          \ > 0) {\n    const document = await documentsClient.getDocument({\n   \
+          \   id: existingDocumentId,\n    });\n    const { metadata, content } =\
+          \ document;\n\n    const documentAsObj = JSON.parse(await content.data.text());\n\
+          \n    for (const newSectionContent of newSectionsContent) {\n      documentAsObj.sections.push({\n\
+          \        id: `${generateGUID()}`,\n        type: \"markdown\",\n       \
+          \ markdown: newSectionContent,\n      });\n    }\n\n    const updated =\
+          \ await documentsClient.updateDocument({\n      id: existingDocumentId,\n\
+          \      optimisticLockingVersion: metadata.version,\n      body: {\n    \
+          \    content: new Blob([JSON.stringify(documentAsObj)], {\n          type:\
+          \ \"application/json\",\n        }),\n      },\n    });\n  }\n}\n\nexport\
+          \ default async function ({ executionId }) {\n    const ex = await execution(executionId)\n\
+          \    const eventPayload = ex.params?.event\n\n    const nowInUTC = Date.now()\n\
+          \    const { journalRecord, task, problemEventId } = eventPayload\n    const\
+          \ journalRecordAsObj = JSON.parse(journalRecord)\n    const taskAsObj =\
+          \ JSON.parse(task)\n    const recordType = journalRecordAsObj.record_type\n\
+          \    const contentObj = JSON.parse(journalRecordAsObj.content)\n\n    console.log(`Received\
+          \ AWS DevOps Agent mitigation results for Dynatrace Problem ${problemEventId}`);\n\
+          \    const { mitigation_summary, execution_plan } = contentObj\n\n    if\
+          \ (recordType == 'mitigation_summary') {\n        const agentSpace = taskAsObj.agent_space_arn.match(/agentspace\\\
+          /([\\w-]+)/)?.[1]\n        const mitigation_summaryStr = mitigation_summary2Str(mitigation_summary)\n\
+          \        const execution_planStr = execution_plans2Str(execution_plan)\n\
+          \n        if (ex?.input?.updateTSGNotebooks) {\n            try {\n    \
+          \            const documentId = createTSGNodebookId(problemEventId, taskAsObj.task_id)\n\
+          \                await updateExistingTSG(documentId, [`# AWS DevOps Agent\
+          \ mitigation response\\n (Dynatrace Problem ${problemEventId}/ AWS DevOps\
+          \ Agent Task id ${taskAsObj?.task_id}/ ${taskAsObj?.version})`, `## Mitigation\
+          \ summay\\n${mitigation_summaryStr}`, `## Execution plan\\n${execution_planStr}`])\n\
+          \                console.log(`Updated TSG notebook ${documentId}`)\n   \
+          \         } catch (e) {\n                console.log(`Warning, cannot update\
+          \ TSG notebook ${e}`)\n            }\n        }\n      \n        const ret\
+          \ = await eventsClient.createEvent({\n            body: {\n            \
+          \    eventType: 'CUSTOM_ANNOTATION',\n                title: 'AWS DevOps\
+          \ Agent mitigation result - ' + taskAsObj.title,\n                startTime:\
+          \ nowInUTC,\n                endTime: nowInUTC,\n                properties:\
+          \ {\n                    'dt.event.description': `AWS DevOps Agent provided\
+          \ input\\nSource: [Link to investigation](https://app.aidevops.aws.com/${agentSpace}/investigation/${taskAsObj.task_id})`,\n\
+          \                    'aws_devopsagent.response_type': 'mitigation_summary',\n\
+          \                    'aws_devopsagent.agent_space_arn': taskAsObj?.agent_space_arn,\n\
+          \                    'aws_devopsagent.task_id' : taskAsObj?.task_id,\n \
+          \                   mitigation_summary: trimIfTooLong(mitigation_summaryStr),\n\
+          \                    execution_plan: trimIfTooLong(execution_planStr !=\
+          \ undefined && execution_planStr !== \"\" ? execution_planStr : '`-`'),\n\
+          \                    'problem.id': problemEventId,\n                   \
+          \ author: 'aws_devopsagent'\n                }\n            }\n        })\n\
+          \n        console.log(`Successfully added AWS DevOps Agent mitigation results\
+          \ to Dynatrace Problem ${problemEventId}`);\n        return {\n        \
+          \    success: true,\n            description: `Appended Custom Annotation\
+          \ to problem ${problemEventId}`,\n            updateTSGNotebooks: ex?.input?.updateTSGNotebooks\
+          \ || false\n        }\n    }\n    \n    return {\n        success: false,\n\
+          \        description: `Did not understand input\\n${JSON.stringify(eventPayload)}`\n\
+          \    }\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 1
+      description: Attach mitigation to Dynatrace Problem
+      predecessors: []
