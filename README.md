@@ -31,14 +31,17 @@ brew install dynatrace-oss/tap/dtctl
 # Authenticate
 dtctl auth login --context my-env --environment "https://<env-id>.apps.dynatrace.com"
 
-# Validate a workflow template (dry-run — no deployment)
+# Extract the flat/API workflow from a template export
+yq '.workflow' my-workflow-template.yaml > my-workflow.yaml
+
+# Validate the extracted workflow (dry-run — no deployment)
 dtctl apply -f my-workflow.yaml --dry-run --plain
 
-# Deploy
+# Deploy the extracted workflow
 dtctl apply -f my-workflow.yaml --plain
 ```
 
-See [AGENTS.md](AGENTS.md#dtctl--dynatrace-cli-for-workflow-management) for the full dtctl reference.
+See [the dtctl reference](docs/dtctl-cli.md) for the full dtctl reference.
 
 ## Repository Structure
 

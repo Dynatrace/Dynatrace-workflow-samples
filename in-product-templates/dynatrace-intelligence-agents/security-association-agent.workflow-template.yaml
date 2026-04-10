@@ -98,8 +98,7 @@ workflow:
       name: notify-in-email
       input:
         cc: []
-        to:
-        - valeriy.leykin@dynatrace.com
+        to: []
         bcc: []
         content: '{{ (result("summarize-analysis").text | replace("\n","\\n") | from_json)["summary"]
           | replace("\\n","\n")}}'

@@ -39,7 +39,7 @@ workflow:
         else: SKIP
 
   trigger: {}
-  schemaVersion: 3
+  schemaVersion: 4
 ```
 
 ### Optional Top-Level Workflow Fields
@@ -53,7 +53,7 @@ workflow:
   description: "Workflow description"
   tasks: {}
   trigger: {}
-  schemaVersion: 3
+  schemaVersion: 4
   result: null                        # Usually null
   input: {}                           # Workflow input parameters
   hourlyExecutionLimit: 1000          # Max executions per hour (default: 1000)
@@ -560,5 +560,4 @@ workflow:
       isActive: true
       isFaulty: false
 
-  schemaVersion: 3
-```
+  schemaVersion: 4

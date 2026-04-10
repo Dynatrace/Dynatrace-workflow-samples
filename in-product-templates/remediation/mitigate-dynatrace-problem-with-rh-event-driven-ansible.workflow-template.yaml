@@ -45,7 +45,7 @@ workflow:
         message: "{\n\t\"blocks\": [\n\t\t{\n\t\t\t\"type\": \"section\",\n\t\t\t\"\
           text\": {\n\t\t\t\t\"type\": \"mrkdwn\",\n\t\t\t\t\"text\": \"Dynatrace\
           \ AutomationEngine :dt: \\n\\nA problem has been detected in your Dynatrace\
-          \ environment. Dynatrace has identified affected entity(s) and wil automatically\
+          \ environment. Dynatrace has identified affected entity(s) and will automatically\
           \ trigger a remediation.\\n\\n\\nStatus: *REMEDIATION TRIGGERED WITH RED\
           \ HAT EVENT DRIVEN ANSIBLE *\"\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"type\":\
           \ \"actions\",\n\t\t\t\"elements\": [\n\t\t\t\t{\n\t\t\t\t\t\"type\": \"\

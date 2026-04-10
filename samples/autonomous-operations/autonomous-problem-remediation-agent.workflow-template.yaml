@@ -22,6 +22,7 @@ metadata:
     targets:
     - tasks.read_current_config.connectionId
     - tasks.create_remediation_pr.connectionId
+    - tasks.open_remediation_pr.connectionId
   - type: connection
     schema: app:dynatrace.msteams:connection
     targets:
@@ -248,8 +249,28 @@ workflow:
             const rootCauseMatch = analysis.match(/ROOT CAUSE:\s*(.+)/i);
             const rootCause = rootCauseMatch ? rootCauseMatch[1].trim() : 'AI-recommended remediation';
 
+            // Apply the AI-suggested patch to the deployment config
+            let updatedConfig = configContent;
+            if (suggestedPatch) {
+              // Try to find a resources block in the patch and replace it in the config
+              const aiResourcesMatch = suggestedPatch.match(/resources:[\s\S]*/m);
+              if (aiResourcesMatch) {
+                const newResourcesYaml = aiResourcesMatch[0].trim();
+                // Replace existing resources block, preserving indentation
+                const replaced = configContent.replace(
+                  /([ \t]+)(resources:(?:\n(?:\2[ \t]+)[^\n]*)*)/m,
+                  (match, indent) => indent + newResourcesYaml.replace(/\n/g, '\n' + indent)
+                );
+                updatedConfig = replaced !== configContent ? replaced
+                  : configContent + '\n# AI Suggested Patch:\n' + suggestedPatch;
+              } else {
+                // For non-resources patches, append with a clear marker
+                updatedConfig = configContent + '\n# AI Suggested Patch:\n' + suggestedPatch;
+              }
+            }
+
             return {
-              updatedConfig: configContent,
+              updatedConfig: updatedConfig,
               suggestedPatch: suggestedPatch,
               commitMessage: `fix: ${rootCause}`,
               fullAnalysis: analysis
@@ -284,9 +305,31 @@ workflow:
       conditions:
         states:
           generate_remediation_patch: OK
-      description: Create pull request with remediation changes on GitOps repository
+      description: Commit remediation changes to a feature branch on the GitOps repository
       predecessors:
       - generate_remediation_patch
+    open_remediation_pr:
+      name: open_remediation_pr
+      input:
+        owner: ''
+        repository: ''
+        head: remediation/{{ event()['event.id'] }}
+        base: main
+        title: '[Auto-Remediation] {{ event()["event.category"] }} — {{ event()["event.name"]
+          }}'
+        body: "{{ result('generate_remediation_patch')['fullAnalysis'] }}\n\nWorkflow\
+          \ Execution: {{ execution().link }}"
+        connectionId: ''
+      action: dynatrace.github.connector:create-pull-request
+      position:
+        x: 0
+        y: 6
+      conditions:
+        states:
+          create_remediation_pr: OK
+      description: Open a pull request for the remediation changes on the GitOps repository
+      predecessors:
+      - create_remediation_pr
     create_change_request:
       name: create_change_request
       input:
@@ -300,7 +343,7 @@ workflow:
           value: "Autonomous remediation proposed by Dynatrace Intelligence.\n\nProblem:\
             \ {{ event()['event.name'] }}\nProblem ID: {{ event()['event.id'] }}\n\
             \nAI Analysis:\n{{ result('generate_remediation_patch')['fullAnalysis']\
-            \ }}\n\nPull Request: Created on branch remediation/{{ event()['event.id']\
+            \ }}\n\nPull Request: {{ result('open_remediation_pr')['url'] | default('N/A')\
             \ }}\nWorkflow Execution: {{ execution().link }}"
         - id: 9c3d4e5f-6a7b-8c9d-0e1f-2a3b4c5d6e7f
           key: category
@@ -319,13 +362,13 @@ workflow:
       action: dynatrace.servicenow:snow-create-record
       position:
         x: 0
-        y: 6
+        y: 7
       conditions:
         states:
-          create_remediation_pr: OK
+          open_remediation_pr: OK
       description: Create ServiceNow change request for approval governance
       predecessors:
-      - create_remediation_pr
+      - open_remediation_pr
     notify_team:
       name: notify_team
       input:
@@ -336,27 +379,32 @@ workflow:
           \     \"type\": \"FactSet\",\n      \"facts\": [\n        {\n          \"\
           title\": \"Problem\",\n          \"value\": \"{{ event()['event.name'] }}\"\
           \n        },\n        {\n          \"title\": \"Category\",\n          \"\
-          value\": \"{{ event()['event.category'] }}\"\n        },\n        {\n  \
-          \        \"title\": \"Change Request\",\n          \"value\": \"{{ result('create_change_request')['number']\
+          value\": \"{{ event()['event.category'] }}\"\n        },\n        {\n   \
+          \       \"title\": \"Pull Request\",\n          \"value\": \"{{ result('open_remediation_pr')['number']\
+          \ | default('pending') }}\"\n        },\n        {\n          \"title\":\
+          \ \"Change Request\",\n          \"value\": \"{{ result('create_change_request')['number']\
           \ | default('pending') }}\"\n        },\n        {\n          \"title\":\
           \ \"Status\",\n          \"value\": \"Awaiting dual approval (ServiceNow\
           \ CR + GitHub PR)\"\n        }\n      ]\n    },\n    {\n      \"type\": \"\
           TextBlock\",\n      \"text\": \"A pull request and change request have been\
           \ created. The remediation will be applied once both are approved.\",\n \
-          \     \"wrap\": true,\n      \"spacing\": \"Medium\"\n    },\n    {\n  \
-          \    \"type\": \"ActionSet\",\n      \"actions\": [\n        {\n        \
-          \  \"type\": \"Action.OpenUrl\",\n          \"title\": \"View Problem in\
+          \     \"wrap\": true,\n      \"spacing\": \"Medium\"\n    },\n    {\n   \
+          \   \"type\": \"ActionSet\",\n      \"actions\": [\n        {\n         \
+          \ \"type\": \"Action.OpenUrl\",\n          \"title\": \"View Problem in\
           \ Dynatrace\",\n          \"url\": \"{{ problem_link() }}\"\n        },\n\
           \        {\n          \"type\": \"Action.OpenUrl\",\n          \"title\"\
-          : \"View Change Request\",\n          \"url\": \"{{ result('create_change_request')['url']\
+          : \"View Pull Request\",\n          \"url\": \"{{ result('open_remediation_pr')['url']\
           \ | default('#') }}\"\n        },\n        {\n          \"type\": \"Action.OpenUrl\"\
-          ,\n          \"title\": \"View Workflow Execution\",\n          \"url\":\
-          \ \"{{ execution().link }}\"\n        }\n      ]\n    }\n  ]\n}"
+          ,\n          \"title\": \"View Change Request\",\n          \"url\": \"{{\
+          \ result('create_change_request')['url'] | default('#') }}\"\n        },\n\
+          \        {\n          \"type\": \"Action.OpenUrl\",\n          \"title\"\
+          : \"View Workflow Execution\",\n          \"url\": \"{{ execution().link\
+          \ }}\"\n        }\n      ]\n    }\n  ]\n}"
         connectionId: ''
       action: dynatrace.msteams:send-message
       position:
         x: 0
-        y: 7
+        y: 8
       conditions:
         states:
           create_change_request: OK

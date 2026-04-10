@@ -152,7 +152,7 @@ With corresponding `workflow.json`:
 {
   "title": "{{ .name }}",
   "description": "Managed by Monaco",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "tasks": {
     "example": {
       "name": "example",

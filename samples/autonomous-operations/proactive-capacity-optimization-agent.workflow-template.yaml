@@ -24,6 +24,7 @@ metadata:
     targets:
     - tasks.read_deployment_configs.connectionId
     - tasks.create_scaling_pr.connectionId
+    - tasks.open_scaling_pr.connectionId
   - type: connection
     schema: app:dynatrace.msteams:connection
     targets:
@@ -231,21 +232,21 @@ workflow:
           You are a capacity planning agent. Analyze the following data sources and provide
           actionable scaling recommendations.
 
-          HISTORICAL RESOURCE UTILIZATION (7 days):
+          HISTORICAL RESOURCE UTILIZATION (7 days, host-level):
           {{ result('query_resource_utilization') }}
 
           RECENT RESOURCE ALERTS:
           {{ result('query_scaling_events') }}
 
-          FORECASTED CPU USAGE (next 7 days, 90% confidence):
+          FORECASTED CPU USAGE (next 7 days, 90% confidence, host-level):
           {{ result('forecast_resource_usage') }}
 
           Provide your response in this structure:
           1. EXECUTIVE SUMMARY: One paragraph overview of capacity health
-          2. AT-RISK SERVICES: List services predicted to exceed 80% utilization within 7 days
-          3. SCALING RECOMMENDATIONS: For each at-risk service, specify:
-             - Current resource limits (CPU/memory)
-             - Recommended new limits
+          2. AT-RISK HOSTS: List hosts predicted to exceed 80% CPU utilization within 7 days
+          3. SCALING RECOMMENDATIONS: For each at-risk host, specify:
+             - Current observed resource utilization (CPU/memory)
+             - Recommended new resource limits
              - Justification (trend + forecast data)
           4. PRIORITY: Rank recommendations by urgency (Critical/High/Medium/Low)
           5. RESOURCE CHANGES: Exact Kubernetes resource spec changes in YAML format:
@@ -313,17 +314,36 @@ workflow:
             const summaryMatch = analysis.match(/EXECUTIVE SUMMARY:\s*([\s\S]*?)(?=\n\d\.|$)/i);
             const executiveSummary = summaryMatch ? summaryMatch[1].trim() : 'Proactive capacity optimization based on forecast analysis.';
 
-            // Extract at-risk services
-            const atRiskMatch = analysis.match(/AT-RISK SERVICES:\s*([\s\S]*?)(?=\n\d\.|$)/i);
-            const atRiskServices = atRiskMatch ? atRiskMatch[1].trim() : '';
+            // Extract at-risk hosts
+            const atRiskMatch = analysis.match(/AT-RISK HOSTS:\s*([\s\S]*?)(?=\n\d\.|$)/i);
+            const atRiskHosts = atRiskMatch ? atRiskMatch[1].trim() : '';
+
+            // Apply AI-recommended resource changes to the deployment config
+            let updatedConfig = configContent;
+            if (recommendedChanges) {
+              // Extract the resources block from the AI output and replace in the deployment YAML
+              const aiResourcesMatch = recommendedChanges.match(/resources:[\s\S]*/m);
+              if (aiResourcesMatch) {
+                const newResourcesYaml = aiResourcesMatch[0].trim();
+                // Replace existing resources block, preserving indentation
+                const replaced = configContent.replace(
+                  /([ \t]+)(resources:(?:\n(?:\2[ \t]+)[^\n]*)*)/m,
+                  (match, indent) => indent + newResourcesYaml.replace(/\n/g, '\n' + indent)
+                );
+                updatedConfig = replaced !== configContent ? replaced
+                  : configContent + '\n# AI Recommended Resource Changes:\n' + recommendedChanges;
+              } else {
+                updatedConfig = configContent + '\n# AI Recommended Resource Changes:\n' + recommendedChanges;
+              }
+            }
 
             const weekDate = new Date().toISOString().split('T')[0];
 
             return {
-              updatedConfig: configContent,
+              updatedConfig: updatedConfig,
               recommendedChanges: recommendedChanges,
               executiveSummary: executiveSummary,
-              atRiskServices: atRiskServices,
+              atRiskHosts: atRiskHosts,
               fullAnalysis: analysis,
               weekDate: weekDate,
               commitMessage: `chore: proactive capacity scaling ${weekDate}`
@@ -356,13 +376,36 @@ workflow:
         x: 0
         y: 6
       conditions:
-        custom: '{{ result("prepare_scaling_changes")["atRiskServices"] | length >
-          0 }}'
+        custom: '{{ result("prepare_scaling_changes")["atRiskHosts"] | length > 0 }}'
         states:
           prepare_scaling_changes: OK
-      description: Create pull request with resource limit updates on GitOps repository
+      description: Commit resource limit updates to a feature branch on the GitOps repository
       predecessors:
       - prepare_scaling_changes
+    open_scaling_pr:
+      name: open_scaling_pr
+      input:
+        owner: ''
+        repository: ''
+        head: capacity/scaling-{{ execution().id }}
+        base: main
+        title: '[Capacity] Proactive scaling changes — {{ result("prepare_scaling_changes")["weekDate"]
+          }}'
+        body: "{{ result('prepare_scaling_changes')['executiveSummary'] }}\n\nAt-Risk\
+          \ Hosts:\n{{ result('prepare_scaling_changes')['atRiskHosts'] }}\n\nForecast\
+          \ Horizon: 7 days (90% confidence)\nRecommended Changes:\n{{ result('prepare_scaling_changes')['recommendedChanges']\
+          \ }}\n\nWorkflow Execution: {{ execution().link }}"
+        connectionId: ''
+      action: dynatrace.github.connector:create-pull-request
+      position:
+        x: 0
+        y: 7
+      conditions:
+        states:
+          create_scaling_pr: OK
+      description: Open a pull request for the scaling changes on the GitOps repository
+      predecessors:
+      - create_scaling_pr
     create_snow_change_request:
       name: create_snow_change_request
       input:
@@ -375,10 +418,10 @@ workflow:
           key: description
           value: "Proactive capacity optimization generated by Dynatrace Intelligence\
             \ predictive analytics.\n\nExecutive Summary:\n{{ result('prepare_scaling_changes')['executiveSummary']\
-            \ }}\n\nAt-Risk Services:\n{{ result('prepare_scaling_changes')['atRiskServices']\
+            \ }}\n\nAt-Risk Hosts:\n{{ result('prepare_scaling_changes')['atRiskHosts']\
             \ }}\n\nForecast Horizon: 7 days (90% confidence)\nRecommended Changes:\n\
             {{ result('prepare_scaling_changes')['recommendedChanges'] }}\n\nPull\
-            \ Request: Created on branch capacity/scaling-{{ execution().id }}\nWorkflow\
+            \ Request: {{ result('open_scaling_pr')['url'] | default('N/A') }}\nWorkflow\
             \ Execution: {{ execution().link }}"
         - id: c3d4e5f6-a7b8-9c0d-1e2f-a3b4c5d6e7f8
           key: category
@@ -397,14 +440,14 @@ workflow:
       action: dynatrace.servicenow:snow-create-record
       position:
         x: 0
-        y: 7
+        y: 8
       conditions:
         states:
-          create_scaling_pr: OK
+          open_scaling_pr: OK
       description: Create ServiceNow change request with capacity analysis and forecast
         data
       predecessors:
-      - create_scaling_pr
+      - open_scaling_pr
     send_capacity_report:
       name: send_capacity_report
       input:
@@ -412,31 +455,35 @@ workflow:
           ,\n  \"version\": \"1.4\",\n  \"body\": [\n    {\n      \"type\": \"TextBlock\"\
           ,\n      \"size\": \"Medium\",\n      \"weight\": \"Bolder\",\n      \"\
           text\": \"\U0001F4CA Weekly Capacity Forecast Report\"\n    },\n    {\n \
-          \     \"type\": \"TextBlock\",\n      \"text\": \"{{ result('prepare_scaling_changes')['executiveSummary']\
-          \ | truncate(500) }}\",\n      \"wrap\": true\n    },\n    {\n      \"type\"\
-          : \"FactSet\",\n      \"facts\": [\n        {\n          \"title\": \"Forecast\
-          \ Horizon\",\n          \"value\": \"7 days (90% confidence)\"\n        },\n\
-          \        {\n          \"title\": \"Change Request\",\n          \"value\"\
-          : \"{{ result('create_snow_change_request')['number'] | default('pending')\
-          \ }}\"\n        },\n        {\n          \"title\": \"Status\",\n       \
-          \   \"value\": \"Awaiting dual approval (ServiceNow CR + GitHub PR)\"\n\
-          \        }\n      ]\n    },\n    {\n      \"type\": \"TextBlock\",\n    \
-          \  \"text\": \"At-Risk Services:\",\n      \"weight\": \"Bolder\",\n   \
-          \   \"spacing\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\"\
-          ,\n      \"text\": \"{{ result('prepare_scaling_changes')['atRiskServices']\
-          \ | truncate(800) }}\",\n      \"wrap\": true,\n      \"fontType\": \"Monospace\"\
-          ,\n      \"size\": \"Small\"\n    },\n    {\n      \"type\": \"ActionSet\"\
-          ,\n      \"actions\": [\n        {\n          \"type\": \"Action.OpenUrl\"\
-          ,\n          \"title\": \"View Change Request\",\n          \"url\": \"\
-          {{ result('create_snow_change_request')['url'] | default('#') }}\"\n   \
-          \     },\n        {\n          \"type\": \"Action.OpenUrl\",\n          \"\
-          title\": \"View Workflow Execution\",\n          \"url\": \"{{ execution().link\
-          \ }}\"\n        }\n      ]\n    }\n  ]\n}"
+          \     \"type\": \"TextBlock\",\n      \"text\": {{ result('prepare_scaling_changes')['executiveSummary']\
+          \ | truncate(500) | to_json }},\n      \"wrap\": true\n    },\n    {\n  \
+          \    \"type\": \"FactSet\",\n      \"facts\": [\n        {\n          \"\
+          title\": \"Forecast Horizon\",\n          \"value\": \"7 days (90% confidence)\"\
+          \n        },\n        {\n          \"title\": \"Pull Request\",\n        \
+          \  \"value\": \"{{ result('open_scaling_pr')['number'] | default('pending')\
+          \ }}\"\n        },\n        {\n          \"title\": \"Change Request\",\n\
+          \          \"value\": \"{{ result('create_snow_change_request')['number']\
+          \ | default('pending') }}\"\n        },\n        {\n          \"title\":\
+          \ \"Status\",\n          \"value\": \"Awaiting dual approval (ServiceNow\
+          \ CR + GitHub PR)\"\n        }\n      ]\n    },\n    {\n      \"type\": \"\
+          TextBlock\",\n      \"text\": \"At-Risk Hosts:\",\n      \"weight\": \"Bolder\"\
+          ,\n      \"spacing\": \"Medium\"\n    },\n    {\n      \"type\": \"TextBlock\"\
+          ,\n      \"text\": {{ result('prepare_scaling_changes')['atRiskHosts'] |\
+          \ truncate(800) | to_json }},\n      \"wrap\": true,\n      \"fontType\"\
+          : \"Monospace\",\n      \"size\": \"Small\"\n    },\n    {\n      \"type\"\
+          : \"ActionSet\",\n      \"actions\": [\n        {\n          \"type\": \"\
+          Action.OpenUrl\",\n          \"title\": \"View Pull Request\",\n        \
+          \  \"url\": \"{{ result('open_scaling_pr')['url'] | default('#') }}\"\n \
+          \       },\n        {\n          \"type\": \"Action.OpenUrl\",\n        \
+          \  \"title\": \"View Change Request\",\n          \"url\": \"{{ result('create_snow_change_request')['url']\
+          \ | default('#') }}\"\n        },\n        {\n          \"type\": \"Action.OpenUrl\"\
+          ,\n          \"title\": \"View Workflow Execution\",\n          \"url\":\
+          \ \"{{ execution().link }}\"\n        }\n      ]\n    }\n  ]\n}"
         connectionId: ''
       action: dynatrace.msteams:send-message
       position:
         x: 0
-        y: 8
+        y: 9
       conditions:
         states:
           create_snow_change_request: OK

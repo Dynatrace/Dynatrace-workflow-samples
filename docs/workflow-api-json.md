@@ -18,7 +18,7 @@ Used for programmatic workflow management via the Automation API.
   "description": "Workflow description",
   "isPrivate": true,
   "triggerType": "Event",
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "trigger": {
     "eventTrigger": {
       "isActive": true,
@@ -72,7 +72,7 @@ curl --request POST 'https://{tenant}.apps.dynatrace.com/platform/automation/v1/
     "description": "Created via API",
     "isPrivate": true,
     "triggerType": "Manual",
-    "schemaVersion": 3,
+    "schemaVersion": 4,
     "trigger": {},
     "tasks": {
       "query_logs": {

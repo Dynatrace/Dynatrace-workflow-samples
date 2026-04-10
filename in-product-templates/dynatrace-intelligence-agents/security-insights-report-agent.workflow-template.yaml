@@ -74,7 +74,7 @@ workflow:
       input:
         cc: []
         to:
-        - valeriy.leykin@dynatrace.com
+        - your.name@example.com
         bcc: []
         content: '{{result("generate-report").text}}'
         subject: Weekly security digest

@@ -43,12 +43,12 @@ workflow:
     \ task launches an Ansible job template. Configure the task with the ID of the\
     \ job template you want \nto launch, and optionally pass extra variables in the\
     \ `extraVars` field.\n  \n# Configure the get-job-status action\n\nThe [get_provisioning_details_of_ansible_job](?task=get_provisioning_details_of_ansible_job&tab=input)\
-    \ task retrieves the status of the Ansible job. In this taks you can specify the\
+    \ task retrieves the status of the Ansible job. In this task you can specify the\
     \ job ID \nfrom the previous task, and use the result in the email content.\n\n\
     - **Job ID**: \nThe job ID is passed from the previous task, for example:\n```code\n\
     {{ result(\"provision_additional_servers\")[\"id\"] }}\n```    \n\n# Configure\
     \ the email action\n\nReplace the email address in the `To` field with your recipient(s)\
-    \ and change the message conent to your liking."
+    \ and change the message content to your liking."
   tasks:
     send_provisioning_details:
       name: send_provisioning_details
@@ -62,7 +62,7 @@ workflow:
 
           <{{ result("get_provisioning_details_of_ansible_job")["summary_fields"]
           }}'
-        subject: Details about Problem }}
+        subject: Details about Problem
       action: dynatrace.email:send-email
       active: true
       position:
