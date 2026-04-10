@@ -325,13 +325,28 @@ workflow:
               const aiResourcesMatch = recommendedChanges.match(/resources:[\s\S]*/m);
               if (aiResourcesMatch) {
                 const newResourcesYaml = aiResourcesMatch[0].trim();
-                // Replace existing resources block, preserving indentation
-                const replaced = configContent.replace(
-                  /([ \t]+)(resources:(?:\n(?:\2[ \t]+)[^\n]*)*)/m,
-                  (match, indent) => indent + newResourcesYaml.replace(/\n/g, '\n' + indent)
-                );
-                updatedConfig = replaced !== configContent ? replaced
-                  : configContent + '\n# AI Recommended Resource Changes:\n' + recommendedChanges;
+                // Find and replace the existing resources block using line-based parsing
+                const lines = configContent.split('\n');
+                let start = -1;
+                let indent = '';
+                for (let i = 0; i < lines.length; i++) {
+                  const m = lines[i].match(/^([ \t]+)resources:/);
+                  if (m) { start = i; indent = m[1]; break; }
+                }
+                if (start !== -1) {
+                  // Find end of block: first non-empty line at same or lesser indentation
+                  let end = start + 1;
+                  while (end < lines.length) {
+                    const l = lines[end];
+                    if (l.trim() !== '' && l.search(/\S/) <= indent.length) break;
+                    end++;
+                  }
+                  // Prepend original indent to each line of the new resources block
+                  const newBlock = newResourcesYaml.split('\n').map(l => indent + l);
+                  updatedConfig = [...lines.slice(0, start), ...newBlock, ...lines.slice(end)].join('\n');
+                } else {
+                  updatedConfig = configContent + '\n# AI Recommended Resource Changes:\n' + recommendedChanges;
+                }
               } else {
                 updatedConfig = configContent + '\n# AI Recommended Resource Changes:\n' + recommendedChanges;
               }
