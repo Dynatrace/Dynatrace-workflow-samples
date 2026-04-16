@@ -1,0 +1,84 @@
+{
+  "name": "AIDLC Outcome Evaluation — BookingService",
+  "description": "Quality gate guardian for the AIDLC Outcome Evaluation Agent. Validates deployment health of the BookingService across performance, reliability, and resource efficiency objectives. Uses Dynatrace Intelligence auto-adaptive thresholds — static values bootstrap the first 5 validations, then thresholds self-adjust based on observed behavior. Non-blocking — produces advisory verdicts consumed by the evaluation workflow.",
+  "tags": [
+    "aidlc",
+    "aidlc-eval",
+    "service:BookingService"
+  ],
+  "variables": [],
+  "eventKind": "SDLC_EVENT",
+  "objectives": [
+    {
+      "name": "P95 Response Time",
+      "description": "95th percentile response time. Auto-adaptive after 5 validations. Bootstrap: warning 2s, fail 3s (observed baseline ~1.6s).",
+      "objectiveType": "DQL",
+      "dqlQuery": "timeseries val = percentile(dt.service.request.response_time, 95), filter: dt.entity.service == \"SERVICE-6B4750F0D8C7C242\"\n| fields max = arrayMax(val)",
+      "comparisonOperator": "LESS_THAN_OR_EQUAL",
+      "target": 3000000,
+      "warning": 2000000,
+      "autoAdaptiveThresholdEnabled": true,
+      "links": [],
+      "segments": []
+    },
+    {
+      "name": "Average Response Time",
+      "description": "Average response time. Auto-adaptive after 5 validations. Bootstrap: warning 600ms, fail 1s (observed baseline ~380ms).",
+      "objectiveType": "DQL",
+      "dqlQuery": "timeseries val = avg(dt.service.request.response_time), filter: dt.entity.service == \"SERVICE-6B4750F0D8C7C242\"\n| fields avg = arrayAvg(val)",
+      "comparisonOperator": "LESS_THAN_OR_EQUAL",
+      "target": 1000000,
+      "warning": 600000,
+      "autoAdaptiveThresholdEnabled": true,
+      "links": [],
+      "segments": []
+    },
+    {
+      "name": "Error Rate",
+      "description": "Error rate percentage. Auto-adaptive after 5 validations. Bootstrap: warning 0.5%, fail 2% (observed baseline 0%).",
+      "objectiveType": "DQL",
+      "dqlQuery": "timeseries { err = sum(dt.service.request.failure_count), total = sum(dt.service.request.count) }, filter: dt.entity.service == \"SERVICE-6B4750F0D8C7C242\"\n| fields rate = 100.0 * arraySum(err) / arraySum(total)",
+      "comparisonOperator": "LESS_THAN_OR_EQUAL",
+      "target": 2,
+      "warning": 0.5,
+      "autoAdaptiveThresholdEnabled": true,
+      "links": [],
+      "segments": []
+    },
+    {
+      "name": "Request Throughput",
+      "description": "Request throughput per 5min interval. Auto-adaptive after 5 validations. Bootstrap: warning <50, fail <30 (observed baseline ~80). Detects routing or availability issues.",
+      "objectiveType": "DQL",
+      "dqlQuery": "timeseries val = sum(dt.service.request.count), interval: 5m, filter: dt.entity.service == \"SERVICE-6B4750F0D8C7C242\"\n| fields avg = arrayAvg(val)",
+      "comparisonOperator": "GREATER_THAN_OR_EQUAL",
+      "target": 30,
+      "warning": 50,
+      "autoAdaptiveThresholdEnabled": true,
+      "links": [],
+      "segments": []
+    },
+    {
+      "name": "Active DAVIS Problems",
+      "description": "No active DAVIS problems should be detected on this service. Any problem is a failure signal.",
+      "objectiveType": "DQL",
+      "dqlQuery": "fetch events, from:now()-30m\n| filter event.kind == \"DAVIS_PROBLEM\"\n| filter in(affected_entity_ids, array(\"SERVICE-6B4750F0D8C7C242\"))\n| filter not(dt.davis.is_duplicate)\n| filter event.status == \"ACTIVE\"\n| summarize problemCount = count()",
+      "comparisonOperator": "LESS_THAN_OR_EQUAL",
+      "target": 0,
+      "autoAdaptiveThresholdEnabled": false,
+      "links": [],
+      "segments": []
+    },
+    {
+      "name": "Error Log Volume",
+      "description": "Error log count in evaluation window. Auto-adaptive after 5 validations. Bootstrap: warning 10, fail 50.",
+      "objectiveType": "DQL",
+      "dqlQuery": "fetch logs, from:now()-30m\n| filter matchesValue(dt.entity.service, \"SERVICE-6B4750F0D8C7C242\")\n| filter loglevel == \"ERROR\"\n| summarize errorCount = count()",
+      "comparisonOperator": "LESS_THAN_OR_EQUAL",
+      "target": 50,
+      "warning": 10,
+      "autoAdaptiveThresholdEnabled": true,
+      "links": [],
+      "segments": []
+    }
+  ]
+}

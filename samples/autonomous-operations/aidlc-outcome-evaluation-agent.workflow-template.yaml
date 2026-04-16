@@ -1,0 +1,853 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.site.reliability.guardian
+      version: ^1.0.0
+    - id: dynatrace.ownership
+      version: ^1.0.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.site.reliability.guardian:guardians
+    targets:
+    - tasks.run_srg_validation.objectId
+workflow:
+  title: 'AIDLC Outcome Evaluation Agent'
+  description: >-
+    Agentic quality gate workflow for the AI-native Software Delivery Lifecycle (AIDLC).
+    Detects deployments to any environment, runs outcome evaluations across six criteria
+    dimensions (performance, reliability, resource efficiency, security, observability
+    completeness, dependency health), executes a Site Reliability Guardian validation,
+    synthesizes findings with Dynatrace Intelligence, and creates a GitHub issue with
+    a structured evaluation report. Non-blocking by default — findings are advisory
+    and informational, not hard gates.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: event
+        value:
+          eventType: events
+          query: >-
+            event.kind == "SDLC_EVENT" and
+            event.type == "deployment.finished"
+      filterQuery: >-
+        event.kind == "SDLC_EVENT" and
+        event.type == "deployment.finished"
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 100
+  guide: >-
+    # AIDLC Outcome Evaluation Agent
+
+
+    This workflow implements the **Delivery & Release Gate** and **Progressive Rollout
+    Verification** phases of the AI-native Software Delivery Lifecycle (AIDLC). It
+    evaluates deployments against six quality dimensions and creates a structured
+    findings report as a GitHub issue.
+
+
+    **This is a non-blocking quality gate.** Findings are advisory — they surface risks,
+    regressions, and opportunities rather than blocking deployments. Teams use the
+    findings to decide whether to proceed, roll back, or investigate further.
+
+
+    # Quality Dimensions
+
+
+    | Dimension | What is checked |
+    |-----------|----------------|
+    | **Performance** | P95/P99 response time vs baseline, throughput stability, error rate delta |
+    | **Reliability** | SLO compliance, DAVIS problems, availability |
+    | **Resource Efficiency** | CPU/memory utilization vs requests, OOM kills, restarts, scaling events |
+    | **Security** | Open vulnerabilities (CRITICAL/HIGH), new security findings since deployment |
+    | **Observability Completeness** | Trace coverage, log visibility, metric availability for changed services |
+    | **Dependency Health** | Downstream service error rates, dependency response time changes |
+
+
+    # Setup
+
+
+    ## 1. SDLC Event Trigger
+
+
+    The workflow triggers on `deployment.finished` SDLC events. Your CI/CD pipeline
+    must ingest these events via the OpenPipeline SDLC events API:
+
+
+    ```bash
+
+    curl -X POST \
+      "https://<ENV>.live.dynatrace.com/platform/ingest/v1/events.sdlc" \
+      -H "Authorization: Api-Token <TOKEN>" \
+      -H "Content-Type: application/json" \
+      -d '{
+        "event.type": "deployment.finished",
+        "dt.entity.service": "SERVICE-XXXXXXXXXXXXXXXX",
+        "service.name": "my-service",
+        "service.namespace": "production",
+        "deployment.id": "deploy-123",
+        "deployment.version": "v2.1.0",
+        "deployment.environment": "production",
+        "vcs.repository.url": "https://github.com/org/repo",
+        "vcs.ref.head.name": "main",
+        "vcs.ref.revision": "abc123def"
+      }'
+
+    ```
+
+
+    ## 2. Site Reliability Guardian
+
+
+    Create an SRG guardian for your service with objectives covering your key SLOs.
+    Update the `run_srg_validation` task with your guardian ID.
+
+
+    ## 3. GitHub Token
+
+
+    Store a GitHub personal access token (with `repo` scope) as a Dynatrace secret
+    named `github_pat`. Update the `create_github_issue` task with your repository owner
+    and name.
+
+
+    ## 4. Customize Evaluation Window
+
+
+    The default evaluation window is 30 minutes post-deployment. Adjust the
+    `evaluation_window` variable in `prepare_evaluation_context` to match your
+    traffic patterns and warm-up time.
+
+
+    # How It Works
+
+
+    1. **Detect** — Captures deployment metadata from the SDLC event trigger
+    2. **Collect** — Parallel DQL queries gather golden signals, resource metrics,
+       error patterns, security findings, and dependency health
+    3. **Validate** — Runs the SRG guardian for formal SLO evaluation
+    4. **Analyze** — Dynatrace Intelligence synthesizes all evidence into structured findings
+    5. **Report** — Creates a GitHub issue with the evaluation report
+    6. **Audit** — Emits a business event for the evaluation outcome (queryable in Grail)
+
+
+    # AIDLC Mapping
+
+
+    | AIDLC Phase | Workflow Role |
+    |-------------|-------------|
+    | Phase 4 — Delivery & Release Gate | SRG validation + performance/reliability checks |
+    | Phase 5 — Progressive Rollout Verification | Continuous post-deployment evaluation |
+    | 3-Lane Remediation Input | Findings classify into Lane A (infra), B (code), C (design) |
+
+  tasks:
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 1: Prepare evaluation context from the deployment event
+    # ─────────────────────────────────────────────────────────────────────
+    prepare_evaluation_context:
+      name: prepare_evaluation_context
+      description: >-
+        Extract deployment metadata from the SDLC event and prepare evaluation
+        parameters. Sets the baseline window (before deployment) and evaluation
+        window (after deployment) for all subsequent queries.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const eventData = ex.event;
+
+            // Deployment metadata from SDLC event
+            const serviceEntityId = eventData['dt.entity.service'] || '';
+            const serviceName = eventData['service.name'] || 'unknown-service';
+            const serviceNamespace = eventData['service.namespace'] || 'default';
+            const deploymentId = eventData['deployment.id'] || execution_id;
+            const deploymentVersion = eventData['deployment.version'] || 'unknown';
+            const deploymentEnv = eventData['deployment.environment'] || 'unknown';
+            const repoUrl = eventData['vcs.repository.url'] || '';
+            const gitRef = eventData['vcs.ref.head.name'] || 'main';
+            const gitRevision = eventData['vcs.ref.revision'] || '';
+
+            // Evaluation timing — 30min post-deployment window, 1h baseline before
+            const evaluationWindowMinutes = 30;
+            const baselineWindowHours = 1;
+
+            return {
+              serviceEntityId,
+              serviceName,
+              serviceNamespace,
+              deploymentId,
+              deploymentVersion,
+              deploymentEnv,
+              repoUrl,
+              gitRef,
+              gitRevision,
+              evaluationWindowMinutes,
+              baselineWindowHours,
+              // DQL time references
+              evalFrom: `now()-${evaluationWindowMinutes}m`,
+              evalInterval: '1m',
+              baselineFrom: `now()-${baselineWindowHours + (evaluationWindowMinutes / 60)}h`,
+              baselineTo: `now()-${evaluationWindowMinutes}m`
+            };
+          }
+      position:
+        x: 0
+        y: 1
+      predecessors: []
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 2: Parallel data collection across six quality dimensions
+    # ─────────────────────────────────────────────────────────────────────
+
+    # 2a. Performance — Golden signals (RED metrics)
+    collect_golden_signals:
+      name: collect_golden_signals
+      description: >-
+        Collect Rate, Error, Duration (RED) metrics for the deployed service.
+        Compares the evaluation window against the pre-deployment baseline.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+          import { queryExecutionClient } from '@dynatrace-sdk/client-query';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const ctx = await ex.result('prepare_evaluation_context');
+            const svcId = ctx.serviceEntityId;
+
+            if (!svcId) {
+              return { error: 'No service entity ID provided', data: null };
+            }
+
+            // Current window — post-deployment
+            const currentQuery = `timeseries {
+              reqCount = sum(dt.service.request.count),
+              errCount = sum(dt.service.request.failure_count),
+              respTime = avg(dt.service.request.response_time),
+              p95 = percentile(dt.service.request.response_time, 95),
+              p99 = percentile(dt.service.request.response_time, 99)
+            }, from: ${ctx.evalFrom}, interval: ${ctx.evalInterval},
+            filter: dt.entity.service == "${svcId}"`;
+
+            // Baseline window — pre-deployment
+            const baselineQuery = `timeseries {
+              reqCount = sum(dt.service.request.count),
+              errCount = sum(dt.service.request.failure_count),
+              respTime = avg(dt.service.request.response_time),
+              p95 = percentile(dt.service.request.response_time, 95),
+              p99 = percentile(dt.service.request.response_time, 99)
+            }, from: ${ctx.baselineFrom}, to: ${ctx.baselineTo}, interval: 1m,
+            filter: dt.entity.service == "${svcId}"`;
+
+            const [current, baseline] = await Promise.all([
+              queryExecutionClient.queryExecute({ body: { query: currentQuery } }),
+              queryExecutionClient.queryExecute({ body: { query: baselineQuery } })
+            ]);
+
+            return {
+              current: current.result?.records || [],
+              baseline: baseline.result?.records || [],
+              service: svcId
+            };
+          }
+      position:
+        x: -2
+        y: 2
+      conditions:
+        states:
+          prepare_evaluation_context: OK
+      predecessors:
+      - prepare_evaluation_context
+
+    # 2b. Reliability — DAVIS problems + SLO status
+    collect_reliability_signals:
+      name: collect_reliability_signals
+      description: >-
+        Check for active DAVIS problems affecting the service and recent SLO
+        burn rate. Also looks for availability drops.
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch events, from:now()-1h
+          | filter event.kind == "DAVIS_PROBLEM"
+          | filter in(affected_entity_ids, array("{{ result('prepare_evaluation_context').serviceEntityId }}"))
+          | filter not(dt.davis.is_duplicate)
+          | fields event.id, event.name, event.category, event.status,
+                  display_id, start_time, root_cause_entity_name,
+                  evidence_details, management_zones
+          | sort start_time desc
+          | limit 20
+      position:
+        x: -1
+        y: 2
+      conditions:
+        states:
+          prepare_evaluation_context: OK
+      predecessors:
+      - prepare_evaluation_context
+
+    # 2c. Resource Efficiency — container metrics + cost signals
+    collect_resource_metrics:
+      name: collect_resource_metrics
+      description: >-
+        Gather container-level resource utilization: CPU, memory, OOM kills,
+        restarts. Used for right-sizing assessment and cost efficiency analysis.
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          timeseries {
+            cpuUsage = avg(dt.kubernetes.container.cpu_usage),
+            memUsage = avg(dt.kubernetes.container.memory_working_set),
+            cpuRequests = avg(dt.kubernetes.container.requests_cpu),
+            memRequests = avg(dt.kubernetes.container.requests_memory),
+            cpuLimits = avg(dt.kubernetes.container.limits_cpu),
+            memLimits = avg(dt.kubernetes.container.limits_memory),
+            restarts = sum(dt.kubernetes.container.restarts),
+            oomKills = sum(dt.kubernetes.container.oom_kills)
+          }, from: now()-1h, interval: 5m,
+          filter: matchesValue(k8s.deployment.name, "*{{ result('prepare_evaluation_context').serviceName }}*")
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          prepare_evaluation_context: OK
+      predecessors:
+      - prepare_evaluation_context
+
+    # 2d. Security — vulnerabilities and security events
+    collect_security_findings:
+      name: collect_security_findings
+      description: >-
+        Query for open runtime vulnerabilities and recent security events
+        affecting the deployed service. Focuses on CRITICAL and HIGH severity.
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch events, from:now()-24h
+          | filter event.type == "VULNERABILITY_STATE_REPORT_EVENT"
+             OR event.type == "DETECTION_FINDING"
+          | filter in(affected_entity_ids, array("{{ result('prepare_evaluation_context').serviceEntityId }}"))
+          | fields event.type, timestamp,
+                  vulnerability.display_id,
+                  vulnerability.title,
+                  dt.security.risk.level,
+                  dt.security.risk.score,
+                  vulnerability.status
+          | sort dt.security.risk.score desc
+          | limit 30
+      position:
+        x: 1
+        y: 2
+      conditions:
+        states:
+          prepare_evaluation_context: OK
+      predecessors:
+      - prepare_evaluation_context
+
+    # 2e. Error pattern analysis
+    collect_error_patterns:
+      name: collect_error_patterns
+      description: >-
+        Analyze error logs in the evaluation window. Detect new error types,
+        error rate trends, and correlate with the deployment.
+      action: dynatrace.automations:execute-dql-query
+      input:
+        query: |-
+          fetch logs, from:now()-1h
+          | filter matchesValue(dt.entity.service, "{{ result('prepare_evaluation_context').serviceEntityId }}")
+             OR matchesPhrase(k8s.deployment.name, "{{ result('prepare_evaluation_context').serviceName }}")
+          | filter loglevel == "ERROR" OR loglevel == "WARN"
+          | summarize errorCount = count(),
+                      errorRate = countIf(loglevel == "ERROR"),
+                      warnRate = countIf(loglevel == "WARN"),
+                      distinctErrors = countDistinct(content),
+                      by: { loglevel, k8s.deployment.name }
+          | sort errorCount desc
+          | limit 20
+      position:
+        x: 2
+        y: 2
+      conditions:
+        states:
+          prepare_evaluation_context: OK
+      predecessors:
+      - prepare_evaluation_context
+
+    # 2f. Dependency health — downstream services
+    collect_dependency_health:
+      name: collect_dependency_health
+      description: >-
+        Check health of downstream services called by the deployed service.
+        Detects cascading failures and dependency degradation.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+          import { queryExecutionClient } from '@dynatrace-sdk/client-query';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const ctx = await ex.result('prepare_evaluation_context');
+            const svcId = ctx.serviceEntityId;
+
+            if (!svcId) {
+              return { error: 'No service entity ID', dependencies: [] };
+            }
+
+            // Discover dependencies via Smartscape
+            const depsQuery = `fetch dt.entity.service
+              | filter id == "${svcId}"
+              | fields id, entity.name, calls`;
+
+            const depsResult = await queryExecutionClient.queryExecute({
+              body: { query: depsQuery }
+            });
+
+            const deps = depsResult.result?.records?.[0]?.calls || [];
+
+            if (deps.length === 0) {
+              return { dependencies: [], message: 'No downstream dependencies found' };
+            }
+
+            // Check error rates of downstream services
+            const depIds = deps.map(d => `"${d}"`).join(', ');
+            const healthQuery = `timeseries {
+              errCount = sum(dt.service.request.failure_count),
+              reqCount = sum(dt.service.request.count),
+              respTime = avg(dt.service.request.response_time)
+            }, from: now()-30m, interval: 5m,
+            filter: in(dt.entity.service, array(${depIds})),
+            by: { dt.entity.service }`;
+
+            const healthResult = await queryExecutionClient.queryExecute({
+              body: { query: healthQuery }
+            });
+
+            return {
+              dependencies: deps,
+              health: healthResult.result?.records || []
+            };
+          }
+      position:
+        x: 3
+        y: 2
+      conditions:
+        states:
+          prepare_evaluation_context: OK
+      predecessors:
+      - prepare_evaluation_context
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 3: Site Reliability Guardian validation
+    # ─────────────────────────────────────────────────────────────────────
+    run_srg_validation:
+      name: run_srg_validation
+      description: >-
+        Execute the Site Reliability Guardian for the target service. The guardian
+        should have objectives covering key SLOs (response time, error rate,
+        availability, throughput). Returns pass/warning/fail verdict.
+      action: dynatrace.site.reliability.guardian:validate-guardian-action
+      input:
+        # Replace with your guardian ID, or use an expression from event data
+        objectId: ''
+        executionId: '{{ execution().id }}'
+        timeframeInputType: timeframeSelector
+        timeframeSelector:
+          from: now-30m
+          to: now
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          collect_golden_signals: OK
+          collect_reliability_signals: OK
+          collect_resource_metrics: OK
+          collect_security_findings: OK
+          collect_error_patterns: OK
+          collect_dependency_health: OK
+        # SRG runs even if some collectors had issues — else SKIP not STOP
+        else: SKIP
+      predecessors:
+      - collect_golden_signals
+      - collect_reliability_signals
+      - collect_resource_metrics
+      - collect_security_findings
+      - collect_error_patterns
+      - collect_dependency_health
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 4: Dynatrace Intelligence analysis
+    # ─────────────────────────────────────────────────────────────────────
+    analyze_outcomes:
+      name: analyze_outcomes
+      description: >-
+        Dynatrace Intelligence synthesizes all collected signals into a structured
+        outcome evaluation. Assesses each quality dimension against AIDLC criteria
+        and classifies findings by severity and remediation lane.
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      input:
+        config: disabled
+        autoTrim: true
+        supplementary: ''
+        prompt: |-
+          You are an AIDLC outcome evaluation agent. You have been given observability
+          signals collected after a deployment. Evaluate each quality dimension and
+          produce a structured findings report.
+
+          ## Deployment Context
+          {{ result('prepare_evaluation_context') | to_json }}
+
+          ## Golden Signals (Rate, Errors, Duration)
+          {{ result('collect_golden_signals') | to_json }}
+
+          ## Reliability (DAVIS Problems)
+          {{ result('collect_reliability_signals') | to_json }}
+
+          ## Resource Metrics (K8s containers)
+          {{ result('collect_resource_metrics') | to_json }}
+
+          ## Security Findings
+          {{ result('collect_security_findings') | to_json }}
+
+          ## Error Patterns
+          {{ result('collect_error_patterns') | to_json }}
+
+          ## Dependency Health
+          {{ result('collect_dependency_health') | to_json }}
+
+          ## SRG Validation Result
+          {% if result('run_srg_validation') %}
+          Status: {{ result('run_srg_validation').validation_status | default('SKIPPED') }}
+          Summary: {{ result('run_srg_validation').validation_summary | default('N/A') }}
+          URL: {{ result('run_srg_validation').validation_url | default('N/A') }}
+          {% else %}
+          SRG validation was skipped.
+          {% endif %}
+
+          ## Evaluation Criteria
+
+          For EACH of these six dimensions, provide a verdict (PASS / WARNING / FAIL / INFO)
+          and evidence-grounded findings. Only flag issues where the data actually shows
+          a problem — do not speculate.
+
+          ### 1. Performance
+          - P95 response time regression > 5% vs baseline → WARNING; > 15% → FAIL
+          - Error rate increase > 0.5% absolute → WARNING; > 2% → FAIL
+          - Throughput drop > 10% → WARNING (may indicate routing issues)
+
+          ### 2. Reliability
+          - Any active DAVIS problem on the service → FAIL
+          - SRG validation FAIL → FAIL; WARNING → WARNING
+          - New problem opened within evaluation window → WARNING
+
+          ### 3. Resource Efficiency
+          - CPU usage > 80% of limits → WARNING; > 95% → FAIL
+          - Memory usage > 85% of limits → WARNING; > 95% → FAIL
+          - Any OOM kills in evaluation window → FAIL
+          - Container restarts > 0 in evaluation window → WARNING
+          - CPU utilization < 20% of requests → INFO (over-provisioned, cost opportunity)
+
+          ### 4. Security
+          - Any CRITICAL vulnerability → FAIL
+          - Any HIGH vulnerability → WARNING
+          - New detection findings since deployment → WARNING
+
+          ### 5. Observability Completeness
+          - If no trace data available → WARNING (blind spot)
+          - If no log data for the service → WARNING (blind spot)
+          - If metric queries returned empty → INFO (check instrumentation)
+
+          ### 6. Dependency Health
+          - Downstream error rate > 1% → WARNING
+          - Downstream response time degradation > 20% → WARNING
+          - Unable to discover dependencies → INFO
+
+          ## Required Output Format
+
+          Respond with EXACTLY this structure:
+
+          OVERALL_VERDICT: [PASS|WARNING|FAIL]
+          CONFIDENCE: [HIGH|MEDIUM|LOW] (based on data completeness)
+
+          DIMENSION_VERDICTS:
+          - Performance: [verdict] — [one-line summary]
+          - Reliability: [verdict] — [one-line summary]
+          - Resource Efficiency: [verdict] — [one-line summary]
+          - Security: [verdict] — [one-line summary]
+          - Observability: [verdict] — [one-line summary]
+          - Dependencies: [verdict] — [one-line summary]
+
+          FINDINGS:
+          For each finding (only actual issues, not passing checks):
+          - FINDING: [title]
+            SEVERITY: [CRITICAL|HIGH|MEDIUM|LOW|INFO]
+            DIMENSION: [which of the 6]
+            EVIDENCE: [specific data points from the signals above]
+            REMEDIATION_LANE: [A=infrastructure|B=code|C=design]
+            SUGGESTED_ACTION: [specific, actionable recommendation]
+
+          RISK_SUMMARY: [2-3 sentences on overall deployment health and recommended action]
+      position:
+        x: 0
+        y: 4
+      conditions:
+        states:
+          run_srg_validation: OK
+        else: SKIP
+      predecessors:
+      - run_srg_validation
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 5: Synthesize findings into GitHub issue
+    # ─────────────────────────────────────────────────────────────────────
+    synthesize_findings:
+      name: synthesize_findings
+      description: >-
+        Structure the AI analysis into a well-formatted GitHub issue body with
+        deployment metadata, verdicts table, detailed findings, evidence links,
+        and next actions.
+      action: dynatrace.automations:run-javascript
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const ctx = await ex.result('prepare_evaluation_context');
+            const analysis = await ex.result('analyze_outcomes');
+            const aiText = analysis?.text || 'Analysis unavailable';
+
+            // Extract overall verdict from AI response
+            const verdictMatch = aiText.match(/OVERALL_VERDICT:\s*(PASS|WARNING|FAIL)/i);
+            const overallVerdict = verdictMatch ? verdictMatch[1].toUpperCase() : 'UNKNOWN';
+
+            const confidenceMatch = aiText.match(/CONFIDENCE:\s*(HIGH|MEDIUM|LOW)/i);
+            const confidence = confidenceMatch ? confidenceMatch[1].toUpperCase() : 'LOW';
+
+            // SRG result
+            let srgResult;
+            try {
+              srgResult = await ex.result('run_srg_validation');
+            } catch (_) {
+              srgResult = null;
+            }
+            const srgStatus = srgResult?.validation_status || 'SKIPPED';
+            const srgUrl = srgResult?.validation_url || '';
+
+            // Build verdict emoji
+            const verdictEmoji = {
+              PASS: '🟢',
+              WARNING: '🟡',
+              FAIL: '🔴',
+              UNKNOWN: '⚪',
+              SKIPPED: '⚪'
+            };
+
+            // Construct the GitHub issue title
+            const emoji = verdictEmoji[overallVerdict] || '⚪';
+            const title = `${emoji} [AIDLC Eval] ${ctx.serviceName} ${ctx.deploymentVersion} → ${ctx.deploymentEnv} — ${overallVerdict}`;
+
+            // Construct the GitHub issue body
+            const body = `## AIDLC Outcome Evaluation Report
+
+          | Property | Value |
+          |----------|-------|
+          | **Service** | \`${ctx.serviceName}\` (${ctx.serviceEntityId}) |
+          | **Version** | \`${ctx.deploymentVersion}\` |
+          | **Environment** | \`${ctx.deploymentEnv}\` |
+          | **Namespace** | \`${ctx.serviceNamespace}\` |
+          | **Deployment ID** | \`${ctx.deploymentId}\` |
+          | **Git Revision** | \`${ctx.gitRevision}\` |
+          | **Overall Verdict** | ${emoji} **${overallVerdict}** (confidence: ${confidence}) |
+          | **SRG Status** | ${verdictEmoji[srgStatus] || '⚪'} ${srgStatus} ${srgUrl ? `([details](${srgUrl}))` : ''} |
+          | **Workflow Execution** | [View in Dynatrace](${ex.url || 'N/A'}) |
+          | **Evaluation Window** | Last ${ctx.evaluationWindowMinutes} minutes |
+
+          ---
+
+          ## Quality Dimension Verdicts
+
+          ${aiText}
+
+          ---
+
+          ## Metadata
+
+          - **Triggered by**: SDLC event \`deployment.finished\`
+          - **Evaluation type**: Non-blocking advisory quality gate
+          - **AIDLC Phase**: Delivery & Release Gate → Progressive Rollout Verification
+          - **Remediation lanes**: A = infrastructure, B = code, C = design rework
+
+          > This issue was created automatically by the AIDLC Outcome Evaluation Agent.
+          > Findings are **advisory** — review the evidence and decide on next actions.
+
+          /cc @${ctx.deploymentEnv === 'production' ? 'team-oncall' : 'team-dev'}`;
+
+            // Labels based on verdict
+            const labels = ['aidlc-eval', `verdict:${overallVerdict.toLowerCase()}`];
+            if (overallVerdict === 'FAIL') labels.push('priority:high');
+            if (srgStatus === 'fail') labels.push('srg:fail');
+
+            return {
+              title,
+              body,
+              labels,
+              overallVerdict,
+              confidence,
+              srgStatus,
+              serviceName: ctx.serviceName,
+              deploymentVersion: ctx.deploymentVersion,
+              deploymentEnv: ctx.deploymentEnv,
+              repoUrl: ctx.repoUrl,
+              deploymentId: ctx.deploymentId
+            };
+          }
+      position:
+        x: 0
+        y: 5
+      conditions:
+        states:
+          analyze_outcomes: OK
+        else: SKIP
+      predecessors:
+      - analyze_outcomes
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 6: Create GitHub issue with findings
+    # ─────────────────────────────────────────────────────────────────────
+    create_github_issue:
+      name: create_github_issue
+      description: >-
+        Create a GitHub issue in the service repository with the structured
+        evaluation report. Uses the GitHub REST API via HTTP action since
+        there is no native GitHub issue creation action.
+      action: dynatrace.automations:http-function
+      input:
+        # Replace 'OWNER' and 'REPO' with your repository, or use expressions
+        # to extract from the event's vcs.repository.url
+        url: 'https://api.github.com/repos/OWNER/REPO/issues'
+        method: POST
+        headers:
+          Accept: application/vnd.github+json
+          Authorization: "Bearer {{ secret('github_pat') }}"
+          X-GitHub-Api-Version: '2022-11-28'
+          Content-Type: application/json
+        payload: |-
+          {
+            "title": {{ result('synthesize_findings').title | to_json }},
+            "body": {{ result('synthesize_findings').body | to_json }},
+            "labels": {{ result('synthesize_findings').labels | to_json }}
+          }
+      position:
+        x: 0
+        y: 6
+      conditions:
+        states:
+          synthesize_findings: OK
+      predecessors:
+      - synthesize_findings
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 7: Emit audit trail event + get ownership for routing
+    # ─────────────────────────────────────────────────────────────────────
+    emit_evaluation_event:
+      name: emit_evaluation_event
+      description: >-
+        Ingest a business event capturing the evaluation outcome. This creates
+        an audit trail queryable from Grail — track evaluation trends,
+        pass/fail rates, and quality evolution over time.
+      action: dynatrace.automations:ingest-bizevent
+      input:
+        body: |-
+          {
+            "specversion": "1.0",
+            "id": "{{ execution().id }}",
+            "source": "aidlc-outcome-evaluation-agent",
+            "type": "aidlc.evaluation.completed",
+            "data": {
+              "service.name": "{{ result('prepare_evaluation_context').serviceName }}",
+              "service.entity.id": "{{ result('prepare_evaluation_context').serviceEntityId }}",
+              "deployment.version": "{{ result('prepare_evaluation_context').deploymentVersion }}",
+              "deployment.environment": "{{ result('prepare_evaluation_context').deploymentEnv }}",
+              "deployment.id": "{{ result('prepare_evaluation_context').deploymentId }}",
+              "evaluation.verdict": "{{ result('synthesize_findings').overallVerdict }}",
+              "evaluation.confidence": "{{ result('synthesize_findings').confidence }}",
+              "evaluation.srg.status": "{{ result('synthesize_findings').srgStatus }}",
+              "evaluation.github.issue.url": "{{ result('create_github_issue').url | default('N/A') }}",
+              "evaluation.workflow.execution.id": "{{ execution().id }}"
+            }
+          }
+      position:
+        x: -1
+        y: 7
+      conditions:
+        states:
+          create_github_issue: OK
+        else: SKIP
+      predecessors:
+      - create_github_issue
+
+    get_service_owners:
+      name: get_service_owners
+      description: >-
+        Look up the ownership team for the evaluated service to route
+        notifications to the right people.
+      action: dynatrace.ownership:get-ownership-from-entity
+      input:
+        entityId: '{{ result("prepare_evaluation_context").serviceEntityId }}'
+      position:
+        x: 1
+        y: 7
+      conditions:
+        states:
+          create_github_issue: OK
+        else: SKIP
+      predecessors:
+      - create_github_issue
+
+    # ─────────────────────────────────────────────────────────────────────
+    # PHASE 8: Notify (optional — configure your channel)
+    # ─────────────────────────────────────────────────────────────────────
+    # Uncomment and configure ONE of the notification actions below.
+    # The Slack action requires the dynatrace.slack app and connection.
+    # The Teams action requires the dynatrace.msteams app and connection.
+
+    # notify_slack:
+    #   name: notify_slack
+    #   description: Send evaluation summary to Slack
+    #   action: dynatrace.slack:slack-send-message
+    #   input:
+    #     channel: '#deployments'
+    #     message: >-
+    #       {{ result('synthesize_findings').overallVerdict }} *AIDLC Eval*:
+    #       `{{ result('prepare_evaluation_context').serviceName }}`
+    #       {{ result('prepare_evaluation_context').deploymentVersion }}
+    #       → {{ result('prepare_evaluation_context').deploymentEnv }}
+    #       | SRG: {{ result('synthesize_findings').srgStatus }}
+    #       | <{{ result('create_github_issue').html_url | default('#') }}|GitHub Issue>
+    #       | <{{ execution().link }}|Workflow>
+    #   connectionId: ''
+    #   position:
+    #     x: 0
+    #     y: 8
+    #   conditions:
+    #     states:
+    #       emit_evaluation_event: OK
+    #       get_service_owners: OK
+    #     else: SKIP
+    #   predecessors:
+    #   - emit_evaluation_event
+    #   - get_service_owners
