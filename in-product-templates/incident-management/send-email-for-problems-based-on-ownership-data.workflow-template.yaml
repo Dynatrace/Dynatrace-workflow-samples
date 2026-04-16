@@ -1,0 +1,117 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.email
+      version: ^1.9.0
+    - id: dynatrace.ownership
+      version: ^2.3.1
+  inputs: []
+workflow:
+  title: Send Email for Problems based on Ownership data
+  description: ''
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+          entityTags: {}
+          customFilter: ''
+          analysisReady: true
+          onProblemClose: false
+          entityTagsMatch: all
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Send email notifications to owners of related hosts\n\nThis workflow reacts\
+    \ to active problems, resolves the owners of the related hosts, and sends a problem\
+    \ summary email directly to those owners.\n\n# Setup\n\nNo additional external\
+    \ connection is required to send emails from this workflow.\nFor detailed configuration\
+    \ options of the email action, see [Send email action](https://dt-url.net/9022zbt).\n\
+    \n# Trigger\n\nBy default, this workflow uses a problem [trigger](?trigger=) that\
+    \ triggers when selected problems become active or are updated.\n\nTo modify the\
+    \ trigger:\n\n- **Problem state**: Choose whether to trigger only when problems\
+    \ become active, or also when they are updated or closed.\n- **Event category**:\
+    \ Adjust `event.category` to target specific types of problems (for example, `ERROR`\
+    \ or `AVAILABILITY`).\n- **Entity filtering**: Use entity tags or filters to limit\
+    \ notifications to specific services or host groups.\n\n# Use related host IDs\
+    \ from the problem\n\nThe [problem trigger](?trigger=) output contains host references\
+    \ in `related_entity_ids`. This workflow uses these IDs to drive the owner lookup\
+    \ for the email recipients.\n\n1. **Access related host IDs**\n\n   In the task\
+    \ that processes related hosts, use a Jinja expression:\n\n   ```code\n   {{event()[\"\
+    related_entity_ids\"]}}\n   ```\n\n2. **Skip processing if no related host exists**\n\
+    \n   To prevent unnecessary tasks when no related hosts are present, the following\
+    \ condition is used:\n\n   ```code\n   {{ (event().get(\"related_entity_ids\"\
+    ) or []) | length > 0 }}\n   ```\n\n   This ensures upcoming actions only run\
+    \ if at least one related host ID is available.\n\n# Resolve the owner email address\n\
+    \nUse the task [fetch_owner_for_problem](?task=fetch_owner_for_problem&tab=input)\
+    \ to map the related host IDs from the problem to the corresponding owner email\
+    \ address.\n\nTypical patterns:\n\n1. **Input**: Pass the related host IDs from\
+    \ the problem event into the lookup task.\n2. **Output**: Ensure the task returns\
+    \ a JSON object with an `email` field.\n\nYou can then reference the result in\
+    \ the email task:\n\n```code\n{{ result(\"fetch_owner_for_problem\")[\"email\"\
+    ] }}\n```\n\n# Configure the email\n\nIn the task [notify_owner_about_problem](?task=notify_owner_about_problem&tab=input),\
+    \ configure the recipients, subject, and message content using Jinja expressions\
+    \ based on the problem event.\n\n1. **Recipients (`To` field)**\n\nThe output\
+    \ email of the [fetch_owner_for_problem](?task=fetch_owner_for_problem&tab=input)\
+    \ task is used:\n\n```code\n{{ result(\"fetch_owner_for_problem\")[\"email\"]\
+    \ }}\n```\n\n2. **Subject**\n\nA recommended subject pattern using problem context:\n\
+    \n```code\n{{ event()[\"event.status\"] }} Problem {{ event()[\"display_id\"]\
+    \ }}: {{ event()[\"event.category\"] }} {{ event()[\"event.name\"] }}\n```\n\n\
+    This results in subjects like:\n\n```text\nACTIVE Problem P-26021: ERROR Failure\
+    \ rate increase\n```\n\n3. **Message body**\n\nUse the problem description and\
+    \ a direct link back to the Problem app:\n\n```code\n{{ event()[\"event.description\"\
+    ] }}\n\nGo to problem: {{ environment().url }}/ui/apps/dynatrace.davis.problems/problem/{{\
+    \ event()[\"event.id\"] }}\n```\n\nYou can extend the body with additional context,\
+    \ for example:\n\n```code\nStatus: {{ event()[\"event.status\"] }}\nImpact level:\
+    \ {{ (event().get(\"dt.davis.impact_level\") or []) | join(\", \") }}\nAffected\
+    \ entity IDs: {{ (event().get(\"affected_entity_ids\") or []) | join(\", \") }}\n\
+    Related hosts: {{ (event().get(\"related_entity_ids\") or []) | join(\", \") }}\n\
+    ```\n\nThis provides the owner with a concise but actionable summary, plus a deep\
+    \ link to investigate the problem in Dynatrace."
+  tasks:
+    fetch_owner_for_problem:
+      name: fetch_owner_for_problem
+      input:
+        entityIds: '{{event()["related_entity_ids"]}}'
+      action: dynatrace.ownership:get-ownership-from-entity
+      position:
+        x: 0
+        y: 1
+      conditions:
+        else: SKIP
+        custom: '{{ (event().get("related_entity_ids") or []) | length > 0 }}'
+        states: {}
+      description: Retrieves owners based on the releated entity id given in the problem
+      predecessors: []
+    notify_owner_about_problem:
+      name: notify_owner_about_problem
+      input:
+        cc: []
+        to:
+        - '{{ result("fetch_owner_for_problem")["email"]}}'
+        bcc: []
+        content: '{{ event()["event.description"] }}
+
+
+          Go to problem: {{ environment().url }}/ui/apps/dynatrace.davis.problems/problem/{{
+          event()["event.id"] }}'
+        subject: '{{ event()["event.status"] }} Problem {{ event()["display_id"] }}:
+          {{ event()["event.category"] }} {{ event()["event.name"] }}'
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 2
+      conditions:
+        else: SKIP
+        custom: '{{ (event().get("related_entity_ids") or []) | length > 0 }}'
+        states:
+          fetch_owner_for_problem: OK
+      description: Send email to the related owner of the problem
+      predecessors:
+      - fetch_owner_for_problem

@@ -1,0 +1,491 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.servicenow
+      version: ^2.3.0
+    - id: dynatrace.github.connector
+      version: ^2.8.0
+    - id: dynatrace.msteams
+      version: ^0.3.13
+  inputs:
+  - type: connection
+    schema: app:dynatrace.servicenow:connection
+    targets:
+    - tasks.search_existing_incident.connectionId
+    - tasks.create_incident.connectionId
+    - tasks.update_incident_with_pr.connectionId
+    - tasks.comment_on_incident.connectionId
+    - tasks.resolve_incident.connectionId
+  - type: connection
+    schema: app:dynatrace.github.connector:connection
+    targets:
+    - tasks.read_runbook_config.connectionId
+    - tasks.create_remediation_pr.connectionId
+  - type: connection
+    schema: app:dynatrace.msteams:connection
+    targets:
+    - tasks.notify_resolution.connectionId
+workflow:
+  title: Autonomous Incident Lifecycle Manager
+  description: Full incident lifecycle management — automatically creates or updates
+    ServiceNow incidents enriched with Dynatrace Intelligence analysis, conditionally
+    triggers auto-remediation via GitOps pull requests based on policy checks, and
+    resolves incidents when problems close.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            info: true
+            error: true
+            custom: true
+            resource: true
+            slowdown: true
+            availability: true
+            monitoringUnavailable: true
+          entityTags: {}
+          customFilter: ''
+          analysisReady: true
+          onProblemClose: true
+          entityTagsMatch: all
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: '# Autonomous Incident Lifecycle Manager
+
+
+    This workflow manages the **complete incident lifecycle** autonomously. It handles
+    three scenarios in a single workflow:
+
+
+    - **New problem**: Creates a ServiceNow incident with AI-enriched analysis, evaluates
+    auto-remediation policy, and optionally creates a GitOps pull request
+
+    - **Existing incident**: Adds AI analysis as a comment to the existing ServiceNow
+    incident
+
+    - **Problem closed**: Resolves the ServiceNow incident with root cause analysis
+    and notifies the team
+
+
+    **Auto-remediation is policy-gated**: A JavaScript task evaluates whether the problem
+    type, severity, and entity tags qualify for autonomous remediation. Only problems
+    matching the policy get a pull request.
+
+
+    **Approval is modeled as a dual gate**: The ServiceNow incident tracks the change,
+    while the GitHub pull request enables code review.
+
+
+    # Setup
+
+
+    This workflow requires connections to ServiceNow, GitHub, and Microsoft Teams.
+
+
+    **ServiceNow connection**: Go to **Settings** > **Connections** > [ServiceNow](/ui/apps/dynatrace.settings/settings/dynatrace.servicenow)
+    > **+ Connection**, provide your ServiceNow instance details, and click **Create**.
+    For details, see [ServiceNow documentation](https://dt-url.net/it03naf).
+
+
+    **GitHub connection**: Go to **Settings** > **Connections** > [GitHub](/ui/apps/dynatrace.settings/settings/dynatrace.github.connector)
+    > **+ Connection**. For details, see [Set up GitHub integration](https://dt-url.net/sz02zyb).
+
+
+    **Microsoft Teams connection**: Go to **Settings** > **Connections** > [Microsoft
+    Teams](/ui/apps/dynatrace.settings/settings/dynatrace.msteams) > **+ Connection**.
+
+
+    # Trigger
+
+
+    This workflow uses a problem [trigger](?trigger=) configured for **all categories**
+    with both `analysisReady` and `onProblemClose` enabled. This means the workflow
+    triggers when a problem opens (after analysis is ready) and again when the problem
+    closes, enabling full lifecycle tracking.
+
+
+    # Problem context
+
+
+    Task [get_problem_details](?task=get_problem_details&tab=input) queries the problem
+    details including severity, affected entities, and impact scope.
+
+
+    # Idempotent incident management
+
+
+    Task [search_existing_incident](?task=search_existing_incident&tab=input) searches
+    ServiceNow for an existing incident using the correlation ID pattern `DT_<event.id>`.
+    This enables idempotent processing — the workflow creates a new incident only if
+    one does not already exist.
+
+
+    # AI analysis
+
+
+    Task [assess_with_intelligence](?task=assess_with_intelligence&tab=input) uses
+    Dynatrace Intelligence to classify the problem severity, recommend remediation
+    actions, and generate root cause analysis.
+
+
+    # Branch A: New problem
+
+
+    If no existing incident is found, the workflow creates a new ServiceNow incident
+    via [create_incident](?task=create_incident&tab=input), then evaluates auto-remediation
+    policy in [evaluate_auto_remediation](?task=evaluate_auto_remediation&tab=input).
+    If policy permits, it reads the runbook config from the GitOps repo and creates
+    a pull request with the fix.
+
+
+    Customize the policy check JavaScript in `evaluate_auto_remediation` to match your
+    organization''s auto-remediation criteria (severity thresholds, entity types, required
+    tags).
+
+
+    # Branch B: Existing incident
+
+
+    If an incident already exists, [comment_on_incident](?task=comment_on_incident&tab=input)
+    adds the latest AI analysis as a comment.
+
+
+    # Branch C: Problem closed
+
+
+    If the problem status is CLOSED, [resolve_incident](?task=resolve_incident&tab=input)
+    updates the ServiceNow incident with the AI root cause summary and sets it to resolved.
+    [notify_resolution](?task=notify_resolution&tab=input) sends a resolution summary
+    to Microsoft Teams.'
+  tasks:
+    get_problem_details:
+      name: get_problem_details
+      input:
+        query: |-
+          fetch events
+          | filter event.kind == "DAVIS_PROBLEM"
+          | filter event.id == "{{ event()['event.id'] }}"
+          | fields event.id, event.name, event.category, event.status,
+                  display_id, start_time, end_time,
+                  affected_entity_ids, root_cause_entity_id,
+                  evidence_details, management_zones,
+                  maintenance_windows
+          | limit 1
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      description: Fetch problem severity, affected entities, and impact scope
+      predecessors: []
+    search_existing_incident:
+      name: search_existing_incident
+      input:
+        connectionId: ''
+        sysparmLimit: '1'
+        sysparmQuery: correlation_id=DT_{{ event()["event.id"] }}
+        sysparmFields: ''
+      action: dynatrace.servicenow:snow-search-incidents
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          get_problem_details: OK
+      description: Search ServiceNow for existing incident by correlation ID
+      predecessors:
+      - get_problem_details
+    assess_with_intelligence:
+      name: assess_with_intelligence
+      input:
+        config: disabled
+        prompt: |-
+          You are an incident management agent. Analyze the following problem and provide
+          a structured assessment.
+
+          PROBLEM DETAILS:
+          {{ result('get_problem_details') }}
+
+          PROBLEM STATUS: {{ event()['event.status'] }}
+
+          Provide your response in this structure:
+          1. SEVERITY CLASSIFICATION: Critical/High/Medium/Low with justification
+          2. ROOT CAUSE: Concise root cause analysis
+          3. IMPACT ASSESSMENT: Affected services, estimated user impact, blast radius
+          4. RECOMMENDED ACTION: Specific remediation steps
+          5. AUTO-REMEDIATION ELIGIBLE: Yes/No — eligible only if:
+             - Problem category is ERROR or AVAILABILITY
+             - Impact is limited to a single service
+             - A known runbook pattern exists (restart, scale, failover)
+          6. RESOLUTION SUMMARY: One-paragraph summary suitable for incident closure
+        autoTrim: true
+        supplementary: ''
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          get_problem_details: OK
+      description: Dynatrace Intelligence classifies severity and recommends action
+      predecessors:
+      - get_problem_details
+    create_incident:
+      name: create_incident
+      input:
+        caller: ''
+        impact: '3'
+        urgency: '2'
+        category: software
+        description: "Incident automatically created by Dynatrace Intelligence.\n\n\
+          Problem: {{ event()['event.name'] }}\nProblem ID: {{ event()['event.id']\
+          \ }}\nCategory: {{ event()['event.category'] }}\n\nAI Assessment:\n{{ result('assess_with_intelligence')['text']\
+          \ }}\n\nWorkflow Execution: {{ execution().link }}"
+        subCategory: operating system
+        connectionId: ''
+        correlationId: DT_{{ event()["event.id"] }}
+        shortDescription: '{{ event()["event.category"] }} — {{ event()["event.name"]
+          }}'
+      action: dynatrace.servicenow:snow-create-incident
+      position:
+        x: -1
+        y: 4
+      conditions:
+        states:
+          search_existing_incident: NOK
+          assess_with_intelligence: OK
+      description: Create new ServiceNow incident with AI-enriched description
+      predecessors:
+      - search_existing_incident
+      - assess_with_intelligence
+    evaluate_auto_remediation:
+      name: evaluate_auto_remediation
+      input:
+        script: |-
+          import { execution } from '@dynatrace-sdk/automation-utils';
+
+          export default async function ({ execution_id }) {
+            const ex = await execution(execution_id);
+            const event = ex.event;
+            const aiResult = await ex.result('assess_with_intelligence');
+            const analysis = aiResult['text'];
+
+            const category = event['event.category'] || '';
+            const status = event['event.status'] || '';
+
+            // Policy gate: only auto-remediate for specific conditions
+            const eligibleCategories = ['ERROR', 'AVAILABILITY'];
+            const categoryEligible = eligibleCategories.includes(category.toUpperCase());
+
+            // Check if AI recommends auto-remediation
+            const aiEligible = /AUTO-REMEDIATION ELIGIBLE:\s*Yes/i.test(analysis);
+
+            // Only auto-remediate active problems (not closed)
+            const isActive = status.toUpperCase() !== 'CLOSED';
+
+            const eligible = categoryEligible && aiEligible && isActive;
+
+            console.log(`Auto-remediation policy check:
+              Category: ${category} (eligible: ${categoryEligible})
+              AI recommendation: ${aiEligible}
+              Active problem: ${isActive}
+              Final decision: ${eligible}`);
+
+            return {
+              eligible: eligible,
+              reason: eligible
+                ? 'Problem matches auto-remediation policy'
+                : `Policy not met: category=${categoryEligible}, ai=${aiEligible}, active=${isActive}`
+            };
+          }
+      action: dynatrace.automations:run-javascript
+      position:
+        x: -1
+        y: 5
+      conditions:
+        states:
+          create_incident: OK
+      description: Evaluate whether problem qualifies for auto-remediation based on
+        policy
+      predecessors:
+      - create_incident
+    read_runbook_config:
+      name: read_runbook_config
+      input:
+        owner: ''
+        filePath: deploy/deployment.yaml
+        reference: main
+        repository: ''
+        connectionId: ''
+      action: dynatrace.github.connector:get-content
+      position:
+        x: -1
+        y: 6
+      conditions:
+        custom: '{{ result("evaluate_auto_remediation")["eligible"] == true }}'
+        states:
+          evaluate_auto_remediation: OK
+      description: Read runbook/deployment config from GitOps repository
+      predecessors:
+      - evaluate_auto_remediation
+    create_remediation_pr:
+      name: create_remediation_pr
+      input:
+        owner: ''
+        branch: auto-remediation/{{ event()['event.id'] }}
+        filePath: deploy/deployment.yaml
+        repository: ''
+        fileContent: '{{ result("read_runbook_config")["content"] }}'
+        connectionId: ''
+        sourceBranch: main
+        commitMessage: 'fix: auto-remediation for {{ event()["event.category"] }}
+          — {{ event()["event.name"] }}'
+        createNewBranch: true
+      action: dynatrace.github.connector:create-or-replace-file
+      position:
+        x: -1
+        y: 7
+      conditions:
+        states:
+          read_runbook_config: OK
+      description: Create pull request with remediation fix (only if policy permits)
+      predecessors:
+      - read_runbook_config
+    update_incident_with_pr:
+      name: update_incident_with_pr
+      input:
+        sysId: '{{ result("create_incident")["sys_id"] }}'
+        fields:
+        - id: a9b0c1d2-e3f4-5a6b-7c8d-9e0f1a2b3c4d
+          key: comments
+          type: journal_input
+          value: "Auto-remediation pull request created.\n\nBranch: auto-remediation/{{\
+            \ event()['event.id'] }}\nPolicy check: {{ result('evaluate_auto_remediation')['reason']\
+            \ }}\n\nThe remediation will be applied once the PR is reviewed and merged."
+        - id: b0c1d2e3-f4a5-6b7c-8d9e-0f1a2b3c4d5e
+          key: number
+          type: string
+          value: '{{ result("create_incident")["number"] }}'
+        tableName: incident
+        connectionId: ''
+      action: dynatrace.servicenow:snow-update-record
+      position:
+        x: -1
+        y: 8
+      conditions:
+        states:
+          create_remediation_pr: OK
+      description: Update ServiceNow incident with pull request reference
+      predecessors:
+      - create_remediation_pr
+    comment_on_incident:
+      name: comment_on_incident
+      input:
+        sysId: '{{ result("search_existing_incident")[0].sys_id }}'
+        fields:
+        - id: c1d2e3f4-a5b6-7c8d-9e0f-1a2b3c4d5e6f
+          key: comments
+          type: journal_input
+          value: "Problem update from Dynatrace Intelligence.\n\nProblem: {{ event()['event.name']\
+            \ }}\nStatus: {{ event()['event.status'] }}\n\nAI Assessment:\n{{ result('assess_with_intelligence')['text']\
+            \ }}\n\nWorkflow Execution: {{ execution().link }}"
+        - id: d2e3f4a5-b6c7-8d9e-0f1a-2b3c4d5e6f7a
+          key: number
+          type: string
+          value: '{{ result("search_existing_incident")[0].number }}'
+        tableName: incident
+        connectionId: ''
+      action: dynatrace.servicenow:snow-update-record
+      position:
+        x: 1
+        y: 4
+      conditions:
+        custom: '{{ event()["event.status"] != "CLOSED" }}'
+        states:
+          search_existing_incident: OK
+          assess_with_intelligence: OK
+      description: Add AI analysis as comment to existing ServiceNow incident
+      predecessors:
+      - search_existing_incident
+      - assess_with_intelligence
+    resolve_incident:
+      name: resolve_incident
+      input:
+        sysId: '{{ result("search_existing_incident")[0].sys_id }}'
+        fields:
+        - id: e3f4a5b6-c7d8-9e0f-1a2b-3c4d5e6f7a8b
+          key: state
+          type: string
+          value: '6'
+        - id: f4a5b6c7-d8e9-0f1a-2b3c-4d5e6f7a8b9c
+          key: close_code
+          type: string
+          value: Solved (Permanently)
+        - id: a5b6c7d8-e9f0-1a2b-3c4d-5e6f7a8b9c0d
+          key: close_notes
+          type: string
+          value: "Incident automatically resolved — Dynatrace problem closed.\n\n\
+            Root Cause Analysis:\n{{ result('assess_with_intelligence')['text'] }}\n\
+            \nWorkflow Execution: {{ execution().link }}"
+        - id: b6c7d8e9-f0a1-2b3c-4d5e-6f7a8b9c0d1e
+          key: number
+          type: string
+          value: '{{ result("search_existing_incident")[0].number }}'
+        tableName: incident
+        connectionId: ''
+      action: dynatrace.servicenow:snow-update-record
+      position:
+        x: 2
+        y: 4
+      conditions:
+        custom: '{{ event()["event.status"] == "CLOSED" }}'
+        states:
+          search_existing_incident: OK
+          assess_with_intelligence: OK
+      description: Resolve ServiceNow incident with AI root cause analysis
+      predecessors:
+      - search_existing_incident
+      - assess_with_intelligence
+    notify_resolution:
+      name: notify_resolution
+      input:
+        message: "{\n  \"type\": \"AdaptiveCard\",\n  \"$schema\": \"http://adaptivecards.io/schemas/adaptive-card.json\"\
+          ,\n  \"version\": \"1.4\",\n  \"body\": [\n    {\n      \"type\": \"TextBlock\"\
+          ,\n      \"size\": \"Medium\",\n      \"weight\": \"Bolder\",\n      \"\
+          text\": \"\u2705 Incident Resolved Automatically\"\n    },\n    {\n     \
+          \ \"type\": \"FactSet\",\n      \"facts\": [\n        {\n          \"title\"\
+          : \"Problem\",\n          \"value\": \"{{ event()['event.name'] }}\"\n  \
+          \      },\n        {\n          \"title\": \"Incident\",\n          \"value\"\
+          : \"{{ result('search_existing_incident')[0].number | default('N/A') }}\"\
+          \n        },\n        {\n          \"title\": \"Status\",\n          \"value\"\
+          : \"Resolved — problem closed by Dynatrace Intelligence\"\n        }\n \
+          \     ]\n    },\n    {\n      \"type\": \"TextBlock\",\n      \"text\": \"\
+          The ServiceNow incident has been automatically resolved with the root cause\
+          \ analysis from Dynatrace Intelligence.\",\n      \"wrap\": true,\n     \
+          \ \"spacing\": \"Medium\"\n    },\n    {\n      \"type\": \"ActionSet\"\
+          ,\n      \"actions\": [\n        {\n          \"type\": \"Action.OpenUrl\"\
+          ,\n          \"title\": \"View Incident in ServiceNow\",\n          \"url\"\
+          : \"{{ result('search_existing_incident')[0].url | default('#') }}\"\n \
+          \       },\n        {\n          \"type\": \"Action.OpenUrl\",\n         \
+          \ \"title\": \"View Workflow Execution\",\n          \"url\": \"{{ execution().link\
+          \ }}\"\n        }\n      ]\n    }\n  ]\n}"
+        connectionId: ''
+      action: dynatrace.msteams:send-message
+      position:
+        x: 2
+        y: 5
+      conditions:
+        states:
+          resolve_incident: OK
+      description: Send resolution summary to Microsoft Teams
+      predecessors:
+      - resolve_incident

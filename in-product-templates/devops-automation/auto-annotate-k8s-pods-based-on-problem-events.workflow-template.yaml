@@ -1,0 +1,168 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.kubernetes.connector
+      version: ^1.2.0
+  inputs: []
+workflow:
+  title: Auto-Annotate K8s Pods based on Problem Events
+  description: ''
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            custom: true
+            resource: true
+            slowdown: true
+            availability: true
+            monitoringUnavailable: true
+          entityTags: {}
+          customFilter: matchesValue(smartscape.affected_entity.types, "K8S_POD")
+          analysisReady: true
+          onProblemClose: true
+          entityTagsMatch: all
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Auto-Annotate K8s Pods based on Problem Events\n\nThis workflow is triggered\
+    \ when a Problem Event occurs that affects `K8S_POD` entities. In such event the\
+    \ pod will be annotated with `metadata.dynatrace.com/problems` and the id of problems\
+    \ the pod is involved in. Annotations can be used to enrich Kubernetes resources\
+    \ with metadata and allow Dynatrace insights to also show up in other products\
+    \ such as ArgoCD.\n\n# Setup\n\n1. **Set up Kubernetes Connector**\\\n   If you\
+    \ have not already you need to [set up a connection](/ui/apps/dynatrace.settings/settings/dynatrace.kubernetes.connector)\
+    \ with Kubernetes. Learn more about [Kubernetes Connector setup](https://dt-url.net/5v2266l)\
+    \ in the official Dynatrace documentation.\n1. **Grant permissions to Workflows**\\\
+    \n   In addition to permissions needed by Kubernetes Connector this workflow also\
+    \ needs permission to read Smartscape nodes and edges from Grail (`storage:smartscape:read`).\n\
+    \n# Trigger configuration\n\nBy default, this workflows uses a problem [trigger](?trigger=)\
+    \ with following configuration:\n* **Event state**: active or closed\n* **Event\
+    \ category**: Error, Custom, Resource, Slowdown, Availability, Monitoring unavailable\n\
+    * **Additional custom filter**:\n  ```\n  matchesValue(smartscape.affected_entity.types,\
+    \ \"K8S_POD\")\n  ```\nFeel free to customize what event categories this workflow\
+    \ should be triggered by.\n\n# Query affected pods\n\nThe [query_affected_pods](?task=query_affected_pods)\
+    \ action queries additional information about pods affected by the problem such\
+    \ as:\n* Namespace of the pod\n* Pod name\n* Pod annotation `metadata.dynatrace.com/problems`\n\
+    \n# Prepare patch\n\nThe [prepare_patch](?task=prepare_patch) action uses the\
+    \ result of *query_affected_pods* as input and prepares patch instructions containing\
+    \ new annotation values for `metadata.dynatrace.com/problems`. Because pods can\
+    \ be affected by multiple problems at the same time a list of problem ids is serialized\
+    \ to text representation such as `[\"P-1234\",\"P-5678\"]`. When a problem is\
+    \ closed this action prepares a patch to remove the problem id from the list or\
+    \ even remove the `metadata.dynatrace.com/problems` annotation altogether if no\
+    \ problem remains.\n\n# Patch pods\n\nThe [patch_pods](?task=patch_pods) action\
+    \ uses the result of *prepare_patch* as input and adds/modifies/removes the `metadata.dynatrace.com/problems`\
+    \ annotation for all affected pods.\n\n# Customization Examples\n\nMaybe pods\
+    \ are not the only kind of resource you want to enrich with additional information.\
+    \ This workflow can be customized to work with entities other than `K8S_POD`.\
+    \ [Learn more](https://docs.dynatrace.com/docs/shortlink/semantic-dictionary-smartscape-kubernetes)\
+    \ about preconfigured Kubernetes entities provided by Smartscape in the official\
+    \ Dynatrace documentation.\n\n# Next steps\n\n* Turn on notifications \U0001F514\
+    \ to be notified about workflow failures via email.\n* Use `kubectl` to verify\
+    \ Kubernetes resources are annotated with `metadata.dynatrace.com/problems` once\
+    \ the workflow has run.\n\n# Learn more\n\n* [Kubernetes Connector](https://dt-url.net/ks026rr)\n\
+    * [Smartscape - Kubernetes](https://dt-url.net/ap4263q)"
+  tasks:
+    patch_pods:
+      name: patch_pods
+      input:
+        name: '{{ _.pod.name }}'
+        patch: '{{ _.pod.patch | to_json }}'
+        strategy: strategic
+        namespace: '{{ _.pod.namespace }}'
+        connection: ''
+        resourceType:
+          kind: Pod
+          name: pods
+          verbs:
+          - create
+          - delete
+          - deletecollection
+          - get
+          - list
+          - patch
+          - update
+          - watch
+          apiVersion: v1
+          namespaced: true
+          shortNames:
+          - po
+      action: dynatrace.kubernetes.connector:patch-resource
+      active: true
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          prepare_patch: OK
+      withItems: pod in {{ result("prepare_patch") }}
+      concurrency: 1
+      description: Patches a Kubernetes resource
+      predecessors:
+      - prepare_patch
+    prepare_patch:
+      name: prepare_patch
+      input:
+        script: "import { execution } from '@dynatrace-sdk/automation-utils';\n\n\
+          function addProblem(id) {\n  return (record) => {\n    let problems = JSON.parse(record.problems\
+          \ || '[]');\n    problems = new Set(problems);\n    problems.add(id);\n\
+          \    problems = [...problems];\n    problems.sort();\n    problems = JSON.stringify(problems);\n\
+          \n    return {\n      ...record,\n      problems\n    }\n  }\n}\n\nfunction\
+          \ removeProblem(id) {\n  return (record) => {\n    let problems = JSON.parse(record.problems\
+          \ || '[]');\n    const index = problems.indexOf(id);\n    if (index > -1)\
+          \ {\n      problems.splice(index, 1)\n    }\n    problems.sort();\n    if\
+          \ (problems.length === 0) {\n      problems = null;\n    } else {\n    \
+          \  problems = JSON.stringify(problems);\n    }\n\n    return {\n      ...record,\n\
+          \      problems\n    }\n  }\n}\n\nexport default async function () {\n \
+          \ const exe = await execution();\n  const eventContext = exe.event();\n\
+          \  let { records } = await exe.result('query_affected_pods');\n\n  return\
+          \ records.map(eventContext['event.kind'] === 'ACTIVE'\n                \
+          \     ? addProblem(eventContext.display_id)\n                     : removeProblem(eventContext.display_id))\n\
+          \                .map(record => ({\n                  namespace: record.namespace,\n\
+          \                  name: record.name,\n                  patch: {\n    \
+          \                metadata: {\n                      annotations: {\n   \
+          \                     'metadata.dynatrace.com/problems': record.problems,\n\
+          \                      },\n                    },\n                  },\n\
+          \                }));\n}\n"
+      action: dynatrace.automations:run-javascript
+      active: true
+      position:
+        x: 0
+        y: 2
+      conditions:
+        custom: ''
+        states:
+          query_affected_pods: OK
+      description: Run custom JavaScript code.
+      predecessors:
+      - query_affected_pods
+    query_affected_pods:
+      name: query_affected_pods
+      input:
+        query: "{% set ns = namespace(records=[]) %}\n{% for affected_entity_id in\
+          \ event()[\"smartscape.affected_entity.ids\"] if affected_entity_id.startswith(\"\
+          K8S_POD\") %}\n  {% set _ = ns.records.append('record(id = toSmartscapeId(\"\
+          ' ~ affected_entity_id ~ '\"))') %}\n{% endfor %}\n{% if ns.records | length\
+          \ > 0 %}\nsmartscapeNodes \"K8S_POD\"\n| filter id in [data {{ ns.records\
+          \ | join(', ') }}]\n| fields namespace = k8s.namespace.name, name = k8s.pod.name,\
+          \ problems = tags[`metadata.dynatrace.com/problems`]\n{% else %}\ndata record()\n\
+          | limit 0\n{% endif %}\n"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      conditions:
+        else: STOP
+        custom: ''
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []

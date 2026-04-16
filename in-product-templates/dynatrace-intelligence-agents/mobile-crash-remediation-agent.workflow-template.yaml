@@ -1,0 +1,199 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+  inputs: []
+workflow:
+  title: Mobile Crash Remediation Agent
+  description: This demo workflow is triggered by a problem and simulates the reachout
+    to an external agent to receive additional information that is then attached to
+    the problem with a troubleshooting document.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: false
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            availability: true
+          entityTags: {}
+          customFilter: matchesPhrase(event.name, "crashes") and isNotNull(dt.entity.mobile_application)
+          onProblemClose: false
+          entityTagsMatch: all
+          analysisReady: false
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 10
+  guide: '# Mobile Crash Remediation Agent
+
+
+    The workflow is triggered by Dynatrace detected increases in mobile app crashes.
+
+    It fetches and uses the crash data from Grail and leverages Dynatrace Intelligence
+    to summarize the crash impact and root cause as well as suggesting a fix code
+    snippet.
+
+
+    # How to Setup
+
+
+    1. Refine the trigger filter to focus on your most critical mobile app crashes,
+    such as by adjusting the crash title filter or impact.
+
+
+    # Fetch Mobile App Crashes
+
+
+    Check the latest mobile app crashes from Dynatrace Grail data, as shown below:
+
+
+    ```dql
+
+    fetch user.events, scanLimitGBytes: 500, from:now()-15m, to:now()
+
+    | filter characteristics.has_error == true
+
+    | filter isNotNull(error.id)
+
+    | filter isNotNull(dt.entity.mobile_application)
+
+    | filter error.type == "crash"
+
+    | sort dt.rum.received_timestamp desc
+
+    | limit 3
+
+    ```
+
+
+    # Suggest Crash Title
+
+
+    Uses Dynatrace Intelligence to generate a concise title for the detected crash.
+
+
+    # Suggest Crash Fix
+
+
+    Uses Dynatrace Intelligence to summarize and explain the Android Java app crash,
+    its impact and root cause in a short paragraph. Also suggests a fixcode code snippet.
+
+
+    # Create Troubleshooting Document
+
+
+    Automatically creates and attaches a Dynatrace Notebook document to the detected
+    problem, containing the crash summary and suggested fix.'
+  tasks:
+    fetch_crash:
+      name: fetch_crash
+      input:
+        query: 'fetch user.events, scanLimitGBytes: 500, from:now()-15m, to:now()
+
+          | filter characteristics.has_error == true
+
+          | filter isNotNull(error.id)
+
+          | filter in(dt.rum.application.entity, {{ ''\"'' + event()[''dt.entity.mobile_application'']|join(''\",
+          \"'') + ''\"''}} )
+
+          | filter error.type == "crash"
+
+          | sort dt.rum.received_timestamp desc
+
+          | limit 3'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    suggest_crash_fix:
+      name: suggest_crash_fix
+      input:
+        config: disabled
+        prompt: Summarize and explain the mobile app crash, its impact and root cause
+          in a short paragraph. Also suggest a fixcode code snippet. Format in Markdown.
+        autoTrim: true
+        supplementary: '{{ result(''fetch_crash'') }}'
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 1
+        y: 2
+      conditions:
+        states:
+          fetch_crash: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - fetch_crash
+    suggest_crash_title:
+      name: suggest_crash_title
+      input:
+        config: disabled
+        prompt: Summarize the Dynatrace detected mobile app crash into a plain text
+          title of max 7 words
+        autoTrim: true
+        supplementary: '{{ result(''fetch_crash'') }}'
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: -1
+        y: 2
+      conditions:
+        states:
+          fetch_crash: OK
+      description: Call Help Agent to find a human readable name for the crash.
+      predecessors:
+      - fetch_crash
+    create_troubleshooting_document:
+      name: create_troubleshooting_document
+      input:
+        script: "/* Demo workflow action that automatically creates and attaches a\
+          \ document (Notebook or Dashboard)\n   to a detected problem.\n   */\nimport\
+          \ { documentsClient } from \"@dynatrace-sdk/client-document\";\nimport {\
+          \ credentialVaultClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          import { execution } from '@dynatrace-sdk/automation-utils';\n\nfunction\
+          \ generateGUID() {\n  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,\
+          \ function(c) {\n    const r = Math.random() * 16 | 0, v = c === 'x' ? r\
+          \ : (r & 0x3 | 0x8);\n    return v.toString(16);\n  });\n}\n\nexport default\
+          \ async function ({ execution_id }) {\n  const ex = await execution(execution_id);\n\
+          \  const problem_event = ex.params.event;\n  var problem_id = problem_event['event.id'];\n\
+          \  problem_id = problem_id.replace('_', '-'); // we need to replace the\
+          \ not allowed char\n\n  var crash_title = await ex.result('suggest_crash_title');\n\
+          \  var crash_fix_markdown = await ex.result('suggest_crash_fix');\n\n\n\
+          \  //var crash_stack_trace = await ex.result('fetch_crash');\n\n  // Create\
+          \ a new Notebook and pin it to the triggering problem\n  try {\n    const\
+          \ notebookContent = {\n      defaultTimeframe: { from: \"now()-2h\", to:\
+          \ \"now()\" },\n      defaultSegments: [],\n      sections: [\n        {\"\
+          id\":\"19ebed94-69a9-4a6e-b392-7bb7b0deb331\",\"type\":\"markdown\",\"markdown\"\
+          :\"# \" + crash_title['text']},\n        {\"id\":\"19ebed94-69a9-4a6e-b392-7bb7b0deb330\"\
+          ,\"type\":\"markdown\",\"markdown\":crash_fix_markdown['text']}\n      ],\n\
+          \    };\n\n    const generatedNotebook = await documentsClient.createDocument({\n\
+          \      body: {\n        name: \"[AI] \" + crash_title['text'],\n       \
+          \ type: \"notebook\",\n        description: \"A notebook containing domain\
+          \ specific analysis results\",\n        id: \"problem-TSG-\" + problem_id\
+          \ + \"-\" + generateGUID(),\n        content: new Blob([JSON.stringify(notebookContent)],\
+          \ { type: \"application/json\" }),\n      },\n    });\n\n    // Make document\
+          \ public\n    const updated = await documentsClient.updateDocument({\n \
+          \       id: generatedNotebook.id,\n        optimisticLockingVersion: generatedNotebook.version,\n\
+          \        body: {\n          isPrivate: true,\n        }\n    })\n\n  } catch\
+          \ (error) {\n    console.error(\"Error creating notebook:\", error);\n \
+          \ }\n  return { };\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          suggest_crash_fix: OK
+          suggest_crash_title: OK
+      description: Inform Root Cause Agent about the code-level fix.
+      predecessors:
+      - suggest_crash_fix
+      - suggest_crash_title

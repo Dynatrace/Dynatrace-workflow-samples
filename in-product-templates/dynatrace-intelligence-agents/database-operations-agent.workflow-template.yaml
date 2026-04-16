@@ -1,0 +1,719 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+  inputs: []
+workflow:
+  title: Database Operations Agent
+  description: An Agentic Workflow Agent to analyze application slowdowns, determine
+    if database slowness is the root cause, and provide AI generated recommendations.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-event
+        value:
+          names:
+          - name: Response time degradation
+            match: equals
+          entityTags: {}
+          customFilter: "isNotNull(dt.event.correlation_id) \nand event.category ==\
+            \ \"SLOWDOWN\"\nand event.type == \"SERVICE_SLOWDOWN\"\nand dt.davis.mute.status\
+            \ == \"NOT_MUTED\"\nand maintenance.is_under_maintenance == false"
+          onProblemClose: false
+          entityTagsMatch: all
+          maintenanceWindowTriggerBehavior: always
+  result: null
+  type: STANDARD
+  input:
+    maxQueries: 5
+    queryThreshold_ms: 1000
+    generateRecommendation: true
+  hourlyExecutionLimit: 10
+  guide: '# Database RCA Agent
+
+    This Agent is triggered by Dynatrace Intelligence detecting application slowness.
+    It analyzes span data to determine if database slowness is causing the application
+    slowdown. If it is, it then matches the span data against database monitoring
+    data. Additional findings are added to the Problem card based on the analysis
+    of the span and database monitoring data.
+
+
+    ## AI generated recommendations
+
+    If the Agent is configured with `generateRecommendation` set to `true`, then the
+    execution plan data will be provided to Dynatrace Assist. Assist will generate
+    recommendations based on the execution plan. These will also be attached to the
+    Problem card.
+
+
+    ## Consumption notice
+
+    Please note that the Agent will trigger multiple billable queries for spans and
+    logs. Also note: Assist generated recommendations may be subject to consumption
+    at a future date.
+
+
+    ## Preview notice
+
+    Please note this functionality is currently in `Private Preview`. See Preview
+    terms & conditions [here](https://docs.dynatrace.com/docs/shortlink/preview-program).
+    Support will be provided through our community forums, [here](https://community.dynatrace.com/).
+    Please also note, a Preview may not reach GA status, and Dynatrace may modify
+    or terminate Preview access at any time.'
+  tasks:
+    fetch_spans:
+      name: fetch_spans
+      input:
+        query: "fetch spans\n| filter matchesValue(dt.entity.service, \"{{event()[\"\
+          dt.source_entity\"] }}\")\n  and span.kind == \"client\" and code.function\
+          \ == \"query\"\n| fieldsAdd db.query.text = coalesce(db.query.text, db.statement)\n\
+          | summarize by: { span.name, db.system, server.address, server.port, db.namespace,\
+          \ db.query.text  }, {maxDuration=max(duration)}\n| filter maxDuration >=\
+          \ duration({{input()[\"queryThreshold_ms\"]}}, \"ms\")\n| sort maxDuration\
+          \ DESC"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 2
+      conditions:
+        custom: '{{result("check_if_already_enriched")["records"]|length == 0}}'
+        states:
+          check_if_already_enriched: OK
+      description: Fetches spans for the affected service to look for database slowness
+      predecessors:
+      - check_if_already_enriched
+    js_emit_db_root_cause:
+      name: js_emit_db_root_cause
+      input:
+        script: "import { execution, result, getTaskExecutionLink } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          \nexport default async function ({ executionId }) {\n  const ex = await\
+          \ execution(executionId);\n  const trigger = ex.params?.event != undefined\
+          \ ? ex.params.event : {};\n  const fetch_spans = await result('fetch_spans');\n\
+          \n  const serviceName = trigger['dt.entity.service.name'];\n  const sourceEntity\
+          \ = trigger['dt.source_entity'];\n  const queryThreshold_ms = ex.input?.['queryThreshold_ms']\
+          \ ?? ' '\n  const correlationId = trigger['dt.event.correlation_id'] ??\
+          \ undefined;\n\n  const maxDuration = fetch_spans.records[0].maxDuration\
+          \ ? fetch_spans.records[0].maxDuration/1000000 : ' ';\n  const spanName\
+          \ = fetch_spans.records[0]['span.name'] ?? ' ';\n  const dbSystem = fetch_spans.records[0]['db.system']\
+          \ ?? ' ';\n  const serverAddress = fetch_spans.records[0]['server.address']\
+          \ ?? ' ';\n  const serverPort = fetch_spans.records[0]['server.port'] ??\
+          \ ' ';\n  const dbNamespace = fetch_spans.records[0]['db.namespace'] ??\
+          \ ' ';\n  const dbQueryText = fetch_spans.records[0]['db.query.text'] ??\
+          \ ' ';\n\n  const query = `fetch spans | filter matchesValue(dt.entity.service,\
+          \ \"${sourceEntity}\") and span.kind == \"client\" and code.function ==\
+          \ \"query\" | filter span.name == \"${spanName}\" and db.system == \"${dbSystem}\"\
+          \ | maketimeseries {\\`Database (ms)\\`=max(duration/1000000)}`;\n  const\
+          \ tsquery = `timeseries \\`Service\\`=max(dt.service.request.response_time),\
+          \ filter: dt.entity.service == \"${sourceEntity}\" | append [${query}]`;\n\
+          \n  const workflow = getTaskExecutionLink();\n\n  const newEvent = {\n \
+          \   eventType: 'PERFORMANCE_EVENT',\n    title: `Database slowdown (span\
+          \ context)`,\n    timeout: 0,\n    properties: {\n      'event.description':\
+          \ `Analyzing slowest spans for affected service (${serviceName}) showed\
+          \ database queries above threshold (${maxDuration} vs ${queryThreshold_ms}\
+          \ ms).`\n        + `\\n\\nDatabase: ${serverAddress}:${serverPort}/${dbNamespace}`\n\
+          \        + `\\n\\nQuery: \\n\\`\\`\\`\\n${dbQueryText}\\n\\`\\`\\``,\n \
+          \     'dt.event.correlation_tag': correlationId,\n      'query_string':\
+          \ tsquery,\n      'chart.query': query,\n      'dt.source_entity': sourceEntity,\n\
+          \      'dt.entity.service': sourceEntity,\n      'workflow': workflow,\n\
+          \      'remediation_step': 'Analyze database slowness',\n    },\n  };\n\n\
+          \  console.log(\"emit_db_root_cause:\",{newEvent, serviceName, sourceEntity,\
+          \ correlationId, query, maxDuration })\n  return await eventsClient.createEvent({\
+          \ body: newEvent });\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 2
+      conditions:
+        custom: '{{result("fetch_spans")["records"]|length > 0}}'
+        states:
+          fetch_spans: OK
+      description: Uses classic SDK to emit a DAVIS_EVENT
+      predecessors:
+      - fetch_spans
+    minify_execution_plan:
+      name: minify_execution_plan
+      input:
+        script: "import { execution, result } from '@dynatrace-sdk/automation-utils';\n\
+          \nexport default async function () {\n  const ex = await execution();\n\
+          \  const fetch_from_db_monitoring = await result('fetch_from_db_monitoring');\n\
+          \  const dbExecutionPlan = fetch_from_db_monitoring.records[0]['execution_plan']?.[0]?.[\"\
+          exec_plan_content\"] ?? ' ';\n  const minified = 'Use this execution plan\
+          \ to respond to the question: '\n  + dbExecutionPlan.replaceAll(/\\s+/g,\
+          \ '').replaceAll('\"','\\\\\"');\n\n  return JSON.stringify(\n    [\n  \
+          \    { type: 'origin-app', value: 'dynatrace.databases.overview' },\n  \
+          \    { type: 'agent', value: 'dynatrace.database.rca.agent' },\n      {\
+          \ type: 'supplementary', value: minified },\n    ]\n  );\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 6
+      conditions:
+        custom: '{{ result(''js_emit_execution_plan'') != false }}'
+        states:
+          js_emit_execution_plan: OK
+      description: Remove white space to make exec plan smaller due to CoPilot limits
+      predecessors:
+      - js_emit_execution_plan
+      customSampleResult: 'Use this execution plan to respond to the question: [{"Plan":{"NodeType":"Gather","ParallelAware":false,"AsyncCapable":false,"StartupCost":1021.92,"TotalCost":16427.05,"PlanRows":986,"PlanWidth":49,"WorkersPlanned":2,"SingleCopy":false,"Plans":[{"NodeType":"HashJoin","ParentRelationship":"Outer","ParallelAware":false,"AsyncCapable":false,"JoinType":"Left","StartupCost":21.93,"TotalCost":15328.45,"PlanRows":411,"PlanWidth":49,"InnerUnique":false,"HashCond":"(a.account_id=p.account_id)","Plans":[{"NodeType":"SeqScan","ParentRelationship":"Outer","ParallelAware":true,"AsyncCapable":false,"RelationName":"account","Alias":"a","StartupCost":0.00,"TotalCost":15278.26,"PlanRows":411,"PlanWidth":21,"Filter":"(email<>$1)"},{"NodeType":"Hash","ParentRelationship":"Inner","ParallelAware":false,"AsyncCapable":false,"StartupCost":15.30,"TotalCost":15.30,"PlanRows":530,"PlanWidth":36,"Plans":[{"NodeType":"SeqScan","ParentRelationship":"Outer","ParallelAware":false,"AsyncCapable":false,"RelationName":"passenger","Alias":"p","StartupCost":0.00,"TotalCost":15.30,"PlanRows":530,"PlanWidth":36}]}]}]}}]'
+    js_emit_execution_plan:
+      name: js_emit_execution_plan
+      input:
+        script: "import { execution, result, getTaskExecutionLink } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          \nconst MAX_EVENT_VALUE_LENGTH = 4096;\n\nexport default async function\
+          \ ({ executionId }) {\n  const ex = await execution(executionId);\n  const\
+          \ trigger = ex.params?.event != undefined ? ex.params.event : {};\n  const\
+          \ fetch_spans = await result('fetch_spans');\n  const fetch_from_db_monitoring\
+          \ = await result('fetch_from_db_monitoring');\n\n  const serviceName = trigger['dt.entity.service.name'];\n\
+          \  const sourceEntity = trigger['dt.source_entity'];\n  const queryThreshold_ms\
+          \ = ex.input?.['queryThreshold_ms'] ?? ' '\n  const correlationId = trigger['dt.event.correlation_id']\
+          \ ?? undefined;\n\n  const maxDuration = fetch_spans.records[0].maxDuration\
+          \ ? fetch_spans.records[0].maxDuration/1000000 : ' ';\n  const spanName\
+          \ = fetch_spans.records[0]['span.name'] ?? ' ';\n  const dbSystem = fetch_spans.records[0]['db.system']\
+          \ ?? ' ';\n  const serverAddress = fetch_spans.records[0]['server.address']\
+          \ ?? ' ';\n  const serverPort = fetch_spans.records[0]['server.port'] ??\
+          \ ' ';\n  const dbNamespace = fetch_spans.records[0]['db.namespace'] ??\
+          \ ' ';\n  const dbQueryText = fetch_spans.records[0]['db.query.text'] ??\
+          \ ' ';\n\n  const dbSourceId = fetch_from_db_monitoring.records[0]['source_id']\
+          \ ?? ' ';\n  const dbSourceEntity = fetch_from_db_monitoring.records[0]['dt.source_entity']\
+          \ ?? ' ';\n  const dbContent = fetch_from_db_monitoring.records[0]['content']\
+          \ ?? ' ';\n  const dbExecutionPlan = fetch_from_db_monitoring.records[0]['execution_plan']?.[0]?.[\"\
+          exec_plan_content\"] ?? ' ';\n  const dbDevice = fetch_from_db_monitoring.records[0]['device']\
+          \ ?? ' ';\n\n  const workflow = getTaskExecutionLink();\n  const environmentUrl\
+          \ = workflow.replace(/(https:\\/\\/[^/]+)\\/.*/,\"$1\");\n\n  if(dbExecutionPlan\
+          \ == \"Couldn't obtain an execution plan. No execution plan was found.\"\
+          \n    || dbExecutionPlan == null){\n    return false;\n  }\n  let eventDescription\
+          \ = ``\n        + `Monitored database: [${serverAddress}:${serverPort}/${dbNamespace}](<${environmentUrl}/ui/apps/dynatrace.database.overview/explorer?perspective=health&sort=healthIndicators%3Adescending&detailsId=${dbSourceId}&sidebarOpen=false&detailsTab=Statement+performance>)`\n\
+          \        + `\\n#### Query:`\n        + \"\\n```\\n\" + dbQueryText + \"\\\
+          n```\"\n        + `\\n\\n#### Execution plan:`\n        + \"\\n```\\n\"\
+          \ + dbExecutionPlan + \"\\n```\";\n  if(eventDescription.length > MAX_EVENT_VALUE_LENGTH)\
+          \ {\n    console.log(\"eventDescription too long, truncating…\");\n    const\
+          \ terminator = \"\\n...\\n```\";\n    eventDescription = eventDescription.substring(0,\
+          \ MAX_EVENT_VALUE_LENGTH - terminator.length) + terminator;\n  }\n\n  const\
+          \ newEvent = {\n    eventType: 'PERFORMANCE_EVENT',\n    title: `Execution\
+          \ plan for slow query`,\n    timeout: 2,\n    properties: {\n      'event.description':\
+          \ eventDescription,\n      'dt.event.correlation_tag': correlationId,\n\
+          \      //This must be the original SERVICE entity to link\n      'dt.source_entity':\
+          \ sourceEntity,\n      'dt.entity.service': sourceEntity,\n      //TODO:\
+          \ get entity type first\n      'dt.entity.sql:postgres_instance': dbSourceId,\n\
+          \      'workflow': workflow,\n      'remediation_step': 'Execution Plan\
+          \ Linking',\n    },\n  };\n\n  console.log(\"js_emit_execution_plan:\",{newEvent,\
+          \ serviceName, sourceEntity, correlationId, dbSourceEntity, dbExecutionPlan\
+          \ })\n  return await eventsClient.createEvent({ body: newEvent });\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 5
+      conditions:
+        custom: '{{result("fetch_from_db_monitoring")["records"][0]["execution_plan"]
+          != None}}'
+        states:
+          js_emit_db_monitoring_found: OK
+      description: If execution_plan is not null, send a new event for the database
+        with the execution plan.
+      predecessors:
+      - js_emit_db_monitoring_found
+    js_emit_recommendations:
+      name: js_emit_recommendations
+      input:
+        script: "import { execution, result, getTaskExecutionLink } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          \nexport default async function ({ executionId }) {\n  const ex = await\
+          \ execution(executionId);\n  const trigger = ex.params?.event != undefined\
+          \ ? ex.params.event : {};\n  const fetch_spans = await result('fetch_spans');\n\
+          \  const fetch_from_db_monitoring = await result('fetch_from_db_monitoring');\n\
+          \  const recommendation = await result('generate_query_recommedation');\n\
+          \n  const serviceName = trigger['dt.entity.service.name'];\n  const sourceEntity\
+          \ = trigger['dt.source_entity'];\n  const queryThreshold_ms = ex.input?.['queryThreshold_ms']\
+          \ ?? ' '\n  const correlationId = trigger['dt.event.correlation_id'] ??\
+          \ undefined;\n\n  const maxDuration = fetch_spans.records[0].maxDuration\
+          \ ? fetch_spans.records[0].maxDuration/1000000 : ' ';\n  const spanName\
+          \ = fetch_spans.records[0]['span.name'] ?? ' ';\n  const dbSystem = fetch_spans.records[0]['db.system']\
+          \ ?? ' ';\n  const serverAddress = fetch_spans.records[0]['server.address']\
+          \ ?? ' ';\n  const serverPort = fetch_spans.records[0]['server.port'] ??\
+          \ ' ';\n  const dbNamespace = fetch_spans.records[0]['db.namespace'] ??\
+          \ ' ';\n  const dbQueryText = fetch_spans.records[0]['db.query.text'] ??\
+          \ ' ';\n\n  const dbSourceId = fetch_from_db_monitoring.records[0]['source_id']\
+          \ ?? ' ';\n  const dbSourceEntity = fetch_from_db_monitoring.records[0]['dt.source_entity']\
+          \ ?? ' ';\n  const dbContent = fetch_from_db_monitoring.records[0]['content']\
+          \ ?? ' ';\n  const dbExecutionPlan = fetch_from_db_monitoring.records[0]['execution_plan']?.[0]?.[\"\
+          exec_plan_content\"] ?? ' ';\n  const dbDevice = fetch_from_db_monitoring.records[0]['device']\
+          \ ?? ' ';\n\n  const workflow = getTaskExecutionLink();\n\n  const newEvent\
+          \ = {\n    eventType: 'PERFORMANCE_EVENT',\n    title: `✨ Recommendations\
+          \ for Slow Query`,\n    timeout: 2,\n    properties: {\n      'event.description':\
+          \ `AI generated recommendations:\\n\\n`\n        + `${recommendation.text}`,\n\
+          \      'dt.event.correlation_tag': correlationId,\n      //This must be\
+          \ the original SERVICE entity to link\n      'dt.source_entity': sourceEntity,\n\
+          \      'dt.entity.service': sourceEntity,\n      //TODO: get entity type\
+          \ first\n      'dt.entity.sql:postgres_instance': dbSourceId,\n      'workflow':\
+          \ workflow,\n      'remediation_step': 'Recommendations',\n    },\n  };\n\
+          \n  console.log(\"js_emit_recommendations:\",{newEvent, serviceName, sourceEntity,\
+          \ correlationId, dbSourceEntity, dbExecutionPlan })\n  return await eventsClient.createEvent({\
+          \ body: newEvent });\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 8
+      conditions:
+        states:
+          generate_query_recommedation: OK
+      description: Emit back LLM recommendations to the Problem.
+      predecessors:
+      - generate_query_recommedation
+    fetch_from_db_monitoring:
+      name: fetch_from_db_monitoring
+      input:
+        query: "   fetch logs, from: -30m\n        | filter in(event.group, array(\"\
+          query_performance\",\"longest_queries\", \"top_queries\"))\n        | filter\
+          \ not contains(content, \"/*dt:ownQuery*/\")\n        | filter not contains(dt.extension.name,\
+          \ \"custom:\")\n        | filter in (dt.extension.name, array(\"com.dynatrace.extension.postgres\"\
+          , \"com.dynatrace.extension.sql-db2\", \"com.dynatrace.extension.sql-server\"\
+          , \"com.dynatrace.extension.sql-oracle\", \"com.dynatrace.extension.mysql\"\
+          )) //only supported extensions\n        | filter not (contains(upper(content),\
+          \ \"COMMIT\") or contains(upper(content), \"ROLLBACK\") or contains(upper(content),\
+          \ \"BEGIN\")  or contains(upper(content), \"SHOW\")  or contains(upper(content),\
+          \ \"SET\") or contains(upper(content), \"FETCH\")) //remove statements with\
+          \ no plan\n        | fieldsAdd sql_id = coalesce(sql_id, queryid)\n    \
+          \    | fieldsAdd instance.name = coalesce(instance.name, database)\n   \
+          \     | filter not isNull(sql_id)\n// filter for query in fetch_spans\n\
+          | filter device == \"{{result(\"fetch_spans\")[\"records\"][0][\"server.address\"\
+          ]}}:{{result(\"fetch_spans\")[\"records\"][0][\"server.port\"]}}:{{result(\"\
+          fetch_spans\")[\"records\"][0][\"db.namespace\"]}}\"\n| fieldsAdd levDistance\
+          \ = levenshteinDistance(content, \"{{result(\"fetch_spans\")[\"records\"\
+          ][0][\"db.query.text\"]|replace('\"','\\\\\"')}}\")\n        | fieldsAdd\
+          \ elapsed_time_ms = if(\n    dt.extension.name == \"com.dynatrace.extension.sql-oracle\"\
+          ,\n    // Oracle: elapsed_time is in MICROSECONDS (cumulative), divide by\
+          \ executions, convert to ms\n    toDouble(elapsed_time) / toDouble(executions)\
+          \ / 1000,\n    else: if(\n        dt.extension.name == \"com.dynatrace.extension.sql-server\"\
+          ,\n        // MSSQL: avg_duration is already in MILLISECONDS\n        toDouble(avg_duration),\n\
+          \        else: if(\n            dt.extension.name == \"com.dynatrace.extension.postgres\"\
+          ,\n            // Postgres: mean_exec_time is in MILLISECONDS\n        \
+          \    toDouble(mean_exec_time),\n            else: if(\n                dt.extension.name\
+          \ == \"com.dynatrace.extension.mysql\" AND event.group == \"query_performance\"\
+          ,\n                // MySQL slow_log: query_time is in SECONDS, convert\
+          \ to ms\n                toDouble(query_time) * 1000,\n                else:\
+          \ if(\n                    dt.extension.name == \"com.dynatrace.extension.mysql\"\
+          \ AND event.group == \"top_queries\",\n                    // MySQL top_queries:\
+          \ avg_timer_wait is in PICOSECONDS, convert to ms (divide by 1e9)\n    \
+          \                toDouble(avg_timer_wait) / 1000000000,\n              \
+          \      else: null\n                )\n            )\n        )\n    )\n\
+          )\n      | summarize {\n    elapsed_time_ms = avg(elapsed_time_ms),\n  \
+          \  levDistance = avg(levDistance)\n}, by: {dt.source_entity, device, instance.name,\
+          \ sql_id, dt.extension.config.id, endpoint, dt.extension.endpoint.hints,\
+          \ dt.extension.name, content, database}\n\n      | filter isNotNull(elapsed_time_ms)\n\
+          \      //add database vendor string required by fetch mechanism\n      |\
+          \ lookup [\n        data record(dt.extension.name = \"com.dynatrace.extension.sql-oracle\"\
+          , vendor = \"ORACLE\"),\n        record(dt.extension.name = \"com.dynatrace.extension.sql-db2\"\
+          , vendor = \"DB2\"),\n        record(dt.extension.name = \"com.dynatrace.extension.sql-server\"\
+          , vendor = \"MSSQL\"),\n        record(dt.extension.name = \"com.dynatrace.extension.mysql\"\
+          , vendor = \"MYSQL\"),\n        record(dt.extension.name = \"com.dynatrace.extension.postgres\"\
+          , vendor = \"POSTGRESQL\")\n      ], sourceField:dt.extension.name, lookupField:dt.extension.name,\
+          \ fields: {vendor}\n      | filter not isNull(vendor)\n      | fieldsAdd\
+          \ source_id = coalesce(arrayLast(dt.source_entity),dt.source_entity)\n\n\
+          \        //join with execution plans\n        | joinNested execution_plan\
+          \ =\n        [\n      fetch logs, from: -120m //don't bring the same exec\
+          \ plan if they exists 2 hours before the frequency window\n      | filter\
+          \ matchesValue(event.group, \"execution_plans\")\n      | fields exec_plan_timestamp\
+          \ = timestamp, exec_plan_generation_timestamp = generation_timestamp, exec_plan_sql_id\
+          \ = sql_id, exec_plan_content = content\n        | dedup exec_plan_sql_id,\
+          \ sort: { exec_plan_timestamp desc }\n      ] , on: { left[sql_id] == right[exec_plan_sql_id]\
+          \ }\n\n      // sort and limit to get the closest match\n      | sort levDistance\
+          \ asc\n      | limit {{input()[\"maxQueries\"]}}"
+      action: dynatrace.automations:execute-dql-query
+      active: true
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          js_emit_db_root_cause: OK
+      description: Check for matching query in Database monitoring
+      predecessors:
+      - js_emit_db_root_cause
+      customSampleResult:
+        types: []
+        records:
+        - device: pg-metis-demo.ckhuiwsqmnv8.us-east-1.rds.amazonaws.com:5432:airbases
+          sql_id: '2899791141184545924'
+          vendor: POSTGRESQL
+          content: "/** Inteview mock **/\nselect A.email,\tp.booking_ref --booking\
+            \ ref is the reference of the booking \nfrom     postgres_air.account\
+            \ A   left join postgres_air.passenger p on A.account_id = p.account_id\
+            \ where A.email != $1"
+          endpoint: pg-metis-demo.ckhuiwsqmnv8.us-east-1.rds.amazonaws.com:5432:airbases
+          source_id: CUSTOM_DEVICE-14AC206A860DF1A4
+          levDistance: 79
+          instance.name: airbases
+          elapsed_time_ms: 127.0355
+          dt.source_entity:
+          - CUSTOM_DEVICE-43C6A3DF3B2F2FCE
+          - CUSTOM_DEVICE-14AC206A860DF1A4
+          dt.extension.name: com.dynatrace.extension.postgres
+          dt.extension.config.id: fd6558b2-66ea-3559-86ec-9c637d520728
+          dt.extension.endpoint.hints:
+          - airbases
+          - pg-metis-demo.ckhuiwsqmnv8.us-east-1.rds.amazonaws.com
+          - '5432'
+        metadata:
+          grail:
+            query: "   fetch logs, from: -30m\n        | filter in(event.group, array(\"\
+              query_performance\",\"longest_queries\", \"top_queries\"))\n       \
+              \ | filter not contains(content, \"/*dt:ownQuery*/\")\n        | filter\
+              \ not contains(dt.extension.name, \"custom:\")\n        | filter in\
+              \ (dt.extension.name, array(\"com.dynatrace.extension.postgres\", \"\
+              com.dynatrace.extension.sql-db2\", \"com.dynatrace.extension.sql-server\"\
+              , \"com.dynatrace.extension.sql-oracle\", \"com.dynatrace.extension.mysql\"\
+              )) //only supported extensions\n        | filter not (contains(upper(content),\
+              \ \"COMMIT\") or contains(upper(content), \"ROLLBACK\") or contains(upper(content),\
+              \ \"BEGIN\")  or contains(upper(content), \"SHOW\")  or contains(upper(content),\
+              \ \"SET\") or contains(upper(content), \"FETCH\")) //remove statements\
+              \ with no plan\n        | fieldsAdd sql_id = coalesce(sql_id, queryid)\n\
+              \        | fieldsAdd instance.name = coalesce(instance.name, database)\n\
+              \        | filter not isNull(sql_id)\n// filter for query in fetch_spans\n\
+              | filter device == \"pg-metis-demo.ckhuiwsqmnv8.us-east-1.rds.amazonaws.com:5432:airbases\"\
+              \n| fieldsAdd levDistance = levenshteinDistance(content, \"select A.email,\
+              \ p.booking_ref from postgres_air.account A left join postgres_air.passenger\
+              \ p on A.account_id = p.account_id where A.email != [L]\")\n       \
+              \ | fieldsAdd elapsed_time_ms = if(\n    dt.extension.name == \"com.dynatrace.extension.sql-oracle\"\
+              ,\n    // Oracle: elapsed_time is in MICROSECONDS (cumulative), divide\
+              \ by executions, convert to ms\n    toDouble(elapsed_time) / toDouble(executions)\
+              \ / 1000,\n    else: if(\n        dt.extension.name == \"com.dynatrace.extension.sql-server\"\
+              ,\n        // MSSQL: avg_duration is already in MILLISECONDS\n     \
+              \   toDouble(avg_duration),\n        else: if(\n            dt.extension.name\
+              \ == \"com.dynatrace.extension.postgres\",\n            // Postgres:\
+              \ mean_exec_time is in MILLISECONDS\n            toDouble(mean_exec_time),\n\
+              \            else: if(\n                dt.extension.name == \"com.dynatrace.extension.mysql\"\
+              \ AND event.group == \"query_performance\",\n                // MySQL\
+              \ slow_log: query_time is in SECONDS, convert to ms\n              \
+              \  toDouble(query_time) * 1000,\n                else: if(\n       \
+              \             dt.extension.name == \"com.dynatrace.extension.mysql\"\
+              \ AND event.group == \"top_queries\",\n                    // MySQL\
+              \ top_queries: avg_timer_wait is in PICOSECONDS, convert to ms (divide\
+              \ by 1e9)\n                    toDouble(avg_timer_wait) / 1000000000,\n\
+              \                    else: null\n                )\n            )\n\
+              \        )\n    )\n)\n      | summarize {\n    elapsed_time_ms = avg(elapsed_time_ms),\n\
+              \    levDistance = avg(levDistance)\n}, by: {dt.source_entity, device,\
+              \ instance.name, sql_id, dt.extension.config.id, endpoint, dt.extension.endpoint.hints,\
+              \ dt.extension.name, content}\n\n      | filter isNotNull(elapsed_time_ms)\n\
+              \      //add database vendor string required by fetch mechanism\n  \
+              \    | lookup [\n        data record(dt.extension.name = \"com.dynatrace.extension.sql-oracle\"\
+              , vendor = \"ORACLE\"),\n        record(dt.extension.name = \"com.dynatrace.extension.sql-db2\"\
+              , vendor = \"DB2\"),\n        record(dt.extension.name = \"com.dynatrace.extension.sql-server\"\
+              , vendor = \"MSSQL\"),\n        record(dt.extension.name = \"com.dynatrace.extension.mysql\"\
+              , vendor = \"MYSQL\"),\n        record(dt.extension.name = \"com.dynatrace.extension.postgres\"\
+              , vendor = \"POSTGRESQL\")\n      ], sourceField:dt.extension.name,\
+              \ lookupField:dt.extension.name, fields: {vendor}\n      | filter not\
+              \ isNull(vendor)\n      | fieldsAdd source_id = coalesce(arrayLast(dt.source_entity),dt.source_entity)\n\
+              \n        //join with execution plans\n        | joinNested execution_plan\
+              \ =\n        [\n      fetch logs, from: -120m //don't bring the same\
+              \ exec plan if they exists 2 hours before the frequency window\n   \
+              \   | filter matchesValue(event.group, \"execution_plans\")\n      |\
+              \ fields exec_plan_timestamp = timestamp, exec_plan_generation_timestamp\
+              \ = generation_timestamp, exec_plan_sql_id = sql_id, exec_plan_content\
+              \ = content\n        | dedup exec_plan_sql_id, sort: { exec_plan_timestamp\
+              \ desc }\n      ] , on: { left[sql_id] == right[exec_plan_sql_id] }\n\
+              \n      // sort and limit to get the closest match\n      | sort levDistance\
+              \ asc\n      | limit 5"
+            locale: und
+            queryId: 1e570762-9cab-4be2-93df-c108e2c6dc59
+            sampled: false
+            timezone: Z
+            dqlVersion: V1_0
+            scannedBytes: 44231992
+            notifications: []
+            canonicalQuery: "fetch logs, from:-30m\n| filter in(event.group, array(\"\
+              query_performance\", \"longest_queries\", \"top_queries\"))\n| filter\
+              \ NOT contains(content, \"/*dt:ownQuery*/\")\n| filter NOT contains(dt.extension.name,\
+              \ \"custom:\")\n| filter in(dt.extension.name, array(\"com.dynatrace.extension.postgres\"\
+              , \"com.dynatrace.extension.sql-db2\", \"com.dynatrace.extension.sql-server\"\
+              , \"com.dynatrace.extension.sql-oracle\", \"com.dynatrace.extension.mysql\"\
+              ))\n| filter NOT (contains(upper(content), \"COMMIT\") OR contains(upper(content),\
+              \ \"ROLLBACK\") OR contains(upper(content), \"BEGIN\") OR contains(upper(content),\
+              \ \"SHOW\") OR contains(upper(content), \"SET\") OR contains(upper(content),\
+              \ \"FETCH\"))\n| fieldsAdd sql_id = coalesce(sql_id, queryid)\n| fieldsAdd\
+              \ instance.name = coalesce(instance.name, database)\n| filter NOT isNull(sql_id)\n\
+              | filter device == \"pg-metis-demo.ckhuiwsqmnv8.us-east-1.rds.amazonaws.com:5432:airbases\"\
+              \n| fieldsAdd levDistance = levenshteinDistance(content, \"select A.email,\
+              \ p.booking_ref from postgres_air.account A left join postgres_air.passenger\
+              \ p on A.account_id = p.account_id where A.email != [L]\")\n| fieldsAdd\
+              \ elapsed_time_ms = if(dt.extension.name == \"com.dynatrace.extension.sql-oracle\"\
+              , toDouble(elapsed_time) / toDouble(executions) / 1000, else:if(dt.extension.name\
+              \ == \"com.dynatrace.extension.sql-server\", toDouble(avg_duration),\
+              \ else:if(dt.extension.name == \"com.dynatrace.extension.postgres\"\
+              , toDouble(mean_exec_time), else:if(dt.extension.name == \"com.dynatrace.extension.mysql\"\
+              \ AND event.group == \"query_performance\", toDouble(query_time) * 1000,\
+              \ else:if(dt.extension.name == \"com.dynatrace.extension.mysql\" AND\
+              \ event.group == \"top_queries\", toDouble(avg_timer_wait) / 1000000000,\
+              \ else:NULL)))))\n| summarize by:{dt.source_entity, device, instance.name,\
+              \ sql_id, dt.extension.config.id, endpoint, dt.extension.endpoint.hints,\
+              \ dt.extension.name, content}, {elapsed_time_ms = avg(elapsed_time_ms),\
+              \ levDistance = avg(levDistance)}\n| filter isNotNull(elapsed_time_ms)\n\
+              | lookup [data record(dt.extension.name = \"com.dynatrace.extension.sql-oracle\"\
+              , vendor = \"ORACLE\"), record(dt.extension.name = \"com.dynatrace.extension.sql-db2\"\
+              , vendor = \"DB2\"), record(dt.extension.name = \"com.dynatrace.extension.sql-server\"\
+              , vendor = \"MSSQL\"), record(dt.extension.name = \"com.dynatrace.extension.mysql\"\
+              , vendor = \"MYSQL\"), record(dt.extension.name = \"com.dynatrace.extension.postgres\"\
+              , vendor = \"POSTGRESQL\")], sourceField:dt.extension.name, lookupField:dt.extension.name,\
+              \ fields:{vendor}\n| filter NOT isNull(vendor)\n| fieldsAdd source_id\
+              \ = coalesce(arrayLast(dt.source_entity), dt.source_entity)\n| joinNested\
+              \ execution_plan = \n\t[\n\t\tfetch logs, from:-120m\n\t\t| filter matchesValue(event.group,\
+              \ \"execution_plans\")\n\t\t| fields exec_plan_timestamp = timestamp,\
+              \ exec_plan_generation_timestamp = generation_timestamp, exec_plan_sql_id\
+              \ = sql_id, exec_plan_content = content\n\t\t| dedup sort:{exec_plan_timestamp\
+              \ desc}, exec_plan_sql_id\n\t], on:{left[sql_id] == right[exec_plan_sql_id]}\n\
+              | sort levDistance\n| limit 5"
+            scannedRecords: 551620
+            analysisTimeframe:
+              end: '2026-01-03T01:42:56.714Z'
+              start: '2026-01-02T23:42:56.714Z'
+            scannedDataPoints: 0
+            executionTimeMilliseconds: 280
+    check_if_already_enriched:
+      name: check_if_already_enriched
+      input:
+        query: 'fetch dt.davis.events
+
+          | filter dt.event.correlation_tag == "{{event()["dt.event.correlation_id"]}}"
+          and event.name == "✨ Recommendations for Slow Query"
+
+          '
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 1
+      description: Check if this problem has already been enriched with AI recommendations,
+        and if so stop.
+      predecessors: []
+    js_trigger_execution_plan:
+      name: js_trigger_execution_plan
+      input:
+        script: "//script to use DQL results to feed API calls\n        import { execution\
+          \ } from \"@dynatrace-sdk/automation-utils\";\n        import { extensions_2_0Client\
+          \ } from \"@dynatrace-sdk/client-classic-environment-v2\";\n\n        export\
+          \ default async function ({ executionId }) {\n          const ex = await\
+          \ execution(executionId);\n          const result = await ex.result(\"fetch_from_db_monitoring\"\
+          );\n          const records = result.records;\n          const fetch_results\
+          \ = [];\n          const endpointCounter = {};\n          for (const query\
+          \ of records) {\n            const endpoint = query[\"endpoint\"];\n   \
+          \         const body = {\n              actions: {\n                executionPlans:\
+          \ [\n                  {\n                    vendor: query.vendor?.toUpperCase()\
+          \ ?? \"\",\n                    params: {\n                      sql_id:\
+          \ query.sql_id,\n                      instance_name: query[\"instance.name\"\
+          ],\n                      query: query.content,\n                    },\n\
+          \                    endpointInfo: {\n                      hints: query[\"\
+          dt.extension.endpoint.hints\"],\n                      shortUrl: endpoint,\n\
+          \                    },\n                  },\n                ],\n    \
+          \          },\n            };\n\n            try {\n              console.log(\"\
+          Triggering fetch...\",{body: JSON.stringify(body,null,2)})\n           \
+          \   const fetch_res =\n                await extensions_2_0Client.executeExtensionMonitoringConfigurationActions(\n\
+          \                  {\n                    extensionName: query[\"dt.extension.name\"\
+          ],\n                    configurationId: query[\"dt.extension.config.id\"\
+          ],\n                    body: body,\n                  }\n             \
+          \   );\n              fetch_results.push(fetch_res);\n            } catch\
+          \ (error) {\n              console.warn(error, { body: JSON.stringify(body,\
+          \ null, 2) });\n            }\n          }\n\n          return { records,\
+          \ fetch_results };\n        }\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 1
+        y: 5
+      conditions:
+        custom: '{{result("fetch_from_db_monitoring")["records"][0]["execution_plan"]
+          == None}}'
+        states:
+          js_emit_db_monitoring_found: OK
+      description: If execution_plan is null, trigger EF to fetch it.
+      predecessors:
+      - js_emit_db_monitoring_found
+    js_emit_fetching_exec_plan:
+      name: js_emit_fetching_exec_plan
+      input:
+        script: "import { execution, result, getTaskExecutionLink } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          \nexport default async function ({ executionId }) {\n  const ex = await\
+          \ execution(executionId);\n  const trigger = ex.params?.event != undefined\
+          \ ? ex.params.event : {};\n  const fetch_spans = await result('fetch_spans');\n\
+          \  const fetch_from_db_monitoring = await result('fetch_from_db_monitoring');\n\
+          \n  const serviceName = trigger['dt.entity.service.name'];\n  const sourceEntity\
+          \ = trigger['dt.source_entity'];\n  const queryThreshold_ms = ex.input?.['queryThreshold_ms']\
+          \ ?? ' '\n  const correlationId = trigger['dt.event.correlation_id'] ??\
+          \ undefined;\n\n  const maxDuration = fetch_spans.records[0].maxDuration\
+          \ ? fetch_spans.records[0].maxDuration/1000000 : ' ';\n  const spanName\
+          \ = fetch_spans.records[0]['span.name'] ?? ' ';\n  const dbSystem = fetch_spans.records[0]['db.system']\
+          \ ?? ' ';\n  const serverAddress = fetch_spans.records[0]['server.address']\
+          \ ?? ' ';\n  const serverPort = fetch_spans.records[0]['server.port'] ??\
+          \ ' ';\n  const dbNamespace = fetch_spans.records[0]['db.namespace'] ??\
+          \ ' ';\n  const dbQueryText = fetch_spans.records[0]['db.query.text'] ??\
+          \ ' ';\n\n  const dbSourceId = fetch_from_db_monitoring.records[0]['source_id']\
+          \ ?? ' ';\n  const dbSourceEntity = fetch_from_db_monitoring.records[0]['dt.source_entity']\
+          \ ?? ' ';\n  const dbContent = fetch_from_db_monitoring.records[0]['content']\
+          \ ?? ' ';\n  const dbExecutionPlan = fetch_from_db_monitoring.records[0]['execution_plan']\
+          \ ?? ' ';\n  const dbDevice = fetch_from_db_monitoring.records[0]['device']\
+          \ ?? ' ';\n\n  const workflow = getTaskExecutionLink();\n  const environmentUrl\
+          \ = workflow.replace(/(https:\\/\\/[^/]+)\\/.*/,\"$1\");\n\n  const newEvent\
+          \ = {\n    eventType: 'PERFORMANCE_EVENT',\n    title: `Fetching execution\
+          \ plan`,\n    timeout: 2,\n    properties: {\n      'event.description':\
+          \ `Execution plan was not cached. Fetching now. Check in the Databases app\
+          \ in ~2 minutes.`\n        + `\\n\\nMonitored database: [${serverAddress}:${serverPort}/${dbNamespace}](${environmentUrl}/ui/apps/dynatrace.database.overview/explorer?perspective=health&sort=healthIndicators%3Adescending&detailsId=${dbSourceId}&sidebarOpen=false&detailsTab=Statement+performance)`\n\
+          \        + `\\n\\nQuery: \\n\\`\\`\\`\\n${dbQueryText}\\n\\`\\`\\``,\n \
+          \     'dt.event.correlation_tag': correlationId,\n      //This must be the\
+          \ original SERVICE entity to link\n      'dt.source_entity': sourceEntity,\n\
+          \      'dt.entity.service': sourceEntity,\n      //TODO: get entity type\
+          \ first\n      'dt.entity.sql:postgres_instance': dbSourceId,\n      'workflow':\
+          \ workflow,\n      'remediation_step': 'Execution Plan Linking',\n    },\n\
+          \  };\n\n  console.log(\"js_emit_fetching_exec_plan:\",{newEvent, serviceName,\
+          \ sourceEntity, correlationId, dbSourceEntity, dbExecutionPlan })\n  return\
+          \ await eventsClient.createEvent({ body: newEvent });\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 1
+        y: 6
+      conditions:
+        states:
+          js_trigger_execution_plan: OK
+      description: Let the user know we're fetching the plan now.
+      predecessors:
+      - js_trigger_execution_plan
+    js_emit_db_monitoring_found:
+      name: js_emit_db_monitoring_found
+      input:
+        script: "import { execution, result, getTaskExecutionLink } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          \nexport default async function ({ executionId }) {\n  const ex = await\
+          \ execution(executionId);\n  const trigger = ex.params?.event != undefined\
+          \ ? ex.params.event : {};\n  const fetch_spans = await result('fetch_spans');\n\
+          \  const fetch_from_db_monitoring = await result('fetch_from_db_monitoring');\n\
+          \n  const serviceName = trigger['dt.entity.service.name'];\n  const sourceEntity\
+          \ = trigger['dt.source_entity'];\n  const queryThreshold_ms = ex.input?.['queryThreshold_ms']\
+          \ ?? ' '\n  const correlationId = trigger['dt.event.correlation_id'] ??\
+          \ undefined;\n\n  const maxDuration = fetch_spans.records[0].maxDuration\
+          \ ? fetch_spans.records[0].maxDuration/1000000 : ' ';\n  const spanName\
+          \ = fetch_spans.records[0]['span.name'] ?? ' ';\n  const dbSystem = fetch_spans.records[0]['db.system']\
+          \ ?? ' ';\n  const serverAddress = fetch_spans.records[0]['server.address']\
+          \ ?? ' ';\n  const serverPort = fetch_spans.records[0]['server.port'] ??\
+          \ ' ';\n  const dbNamespace = fetch_spans.records[0]['db.namespace'] ??\
+          \ ' ';\n  const dbQueryText = fetch_spans.records[0]['db.query.text'] ??\
+          \ ' ';\n\n  const dbSourceId = fetch_from_db_monitoring.records[0]['source_id']\
+          \ ?? ' ';\n  const dbSourceEntity = fetch_from_db_monitoring.records[0]['dt.source_entity']\
+          \ ?? ' ';\n  const dbContent = fetch_from_db_monitoring.records[0]['content']\
+          \ ?? ' ';\n  const dbExecutionPlan = fetch_from_db_monitoring.records[0]['execution_plan']\
+          \ ?? ' ';\n  const dbDevice = fetch_from_db_monitoring.records[0]['device']\
+          \ ?? ' ';\n  const dbQueryId = fetch_from_db_monitoring.records[0]['sql_id']\
+          \ ?? ' ';\n  const dbDatabase = fetch_from_db_monitoring.records[0]['database']\
+          \ ?? ' ';\n\n  const workflow = getTaskExecutionLink();\n  const environmentUrl\
+          \ = workflow.replace(/(https:\\/\\/[^/]+)\\/.*/,\"$1\");\n\n  const query\
+          \ = `fetch logs \n    | filter matchesValue(dt.source_entity, \"${dbSourceId}\"\
+          )\n      AND matchesValue(queryid, \"${dbQueryId}\")\n      AND matchesValue(database,\
+          \ \"${dbDatabase}\")\n      AND isNotNull(calls)\n      AND isNotNull(max_exec_time)\n\
+          \      AND isNotNull(mean_exec_time)\n      AND isNotNull(total_exec_time)`\n\
+          \  +\"| makeTimeseries {`Calls`=avg(toDouble(calls)), `Maximum execution\
+          \ time`=avg(toDouble(max_exec_time)), `Mean execution time`=avg(toDouble(mean_exec_time)),\
+          \ `Total execution time`=max(toDouble(total_exec_time))}, interval: 5m\"\
+          \n  +\"| fieldsAdd `Number of calls delta` = arrayDelta(`Calls`), `Total\
+          \ execution time delta` = arrayDelta(`Total execution time`)\"\n  +\"| fieldsAdd\
+          \ `Mean execution time delta` = `Total execution time delta`[] / `Number\
+          \ of calls delta`[]\"\n  +\"| fieldsRemove `Total execution time`, `Calls`,\
+          \ `Number of calls delta`, `Mean execution time`\";\n  const tsquery = `timeseries\
+          \ \\`Service\\`=max(dt.service.request.response_time), filter: dt.entity.service\
+          \ == \"${sourceEntity}\" | append [${query}]`;\n\n  const newEvent = {\n\
+          \    eventType: 'PERFORMANCE_EVENT',\n    title: `Database slowdown (database\
+          \ context)`,\n    timeout: 2,\n    properties: {\n      'event.description':\
+          \ `Possible match for query in database monitoring.`\n        + `\\n\\nMonitored\
+          \ database: [${serverAddress}:${serverPort}/${dbNamespace}](${environmentUrl}/ui/apps/dynatrace.database.overview/explorer?perspective=health&sort=healthIndicators%3Adescending&detailsId=${dbSourceId}&sidebarOpen=false&detailsTab=Statement+performance)`\n\
+          \        + `\\n\\nQuery: \\n\\`\\`\\`\\n${dbQueryText}\\n\\`\\`\\``,\n \
+          \     'dt.event.correlation_tag': correlationId,\n      //This must be the\
+          \ original SERVICE entity to link\n      'dt.source_entity': sourceEntity,\n\
+          \      'dt.entity.service': sourceEntity,\n      //TODO: get entity type\
+          \ first\n      'dt.entity.sql:postgres_instance': dbSourceId,\n      'query_string':\
+          \ tsquery,\n      'workflow': workflow,\n      'remediation_step': 'Span-Database\
+          \ Linking',\n    },\n  };\n\n  console.log(\"emit_db_root_cause:\",{newEvent,\
+          \ environmentUrl })\n  return await eventsClient.createEvent({ body: newEvent\
+          \ });\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 4
+      conditions:
+        custom: '{{result("fetch_from_db_monitoring")["records"]|length > 0}}'
+        states:
+          fetch_from_db_monitoring: OK
+      description: If fetch_from_db_monitoring returns a result, then emit an event
+        to link the database monitoring
+      predecessors:
+      - fetch_from_db_monitoring
+    generate_query_recommedation:
+      name: generate_query_recommedation
+      input:
+        config: disabled
+        prompt: Explain and provide insights on this database execution plan in the
+          Dynatrace context.
+        autoTrim: true
+        supplementary: '{{ result(''minify_execution_plan'') }}'
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 7
+      conditions:
+        custom: '{{ input()["generateRecommendation"] == true and result(''minify_execution_plan'')
+          != None }}'
+        states:
+          minify_execution_plan: OK
+      description: Prompt LLM for query recommendations
+      predecessors:
+      - minify_execution_plan
+    js_emit_db_monitoring_not_found:
+      name: js_emit_db_monitoring_not_found
+      input:
+        script: "import { execution, result, getTaskExecutionLink } from '@dynatrace-sdk/automation-utils';\n\
+          import { eventsClient } from '@dynatrace-sdk/client-classic-environment-v2';\n\
+          // import { getEnvironmentUrl } from '@dynatrace-sdk/platform/app-environment';\
+          \ //not allowed\n\nexport default async function ({ executionId }) {\n \
+          \ const ex = await execution(executionId);\n  const trigger = ex.params?.event\
+          \ != undefined ? ex.params.event : {};\n  const fetch_spans = await result('fetch_spans');\n\
+          \n  const serviceName = trigger['dt.entity.service.name'];\n  const sourceEntity\
+          \ = trigger['dt.source_entity'];\n  const queryThreshold_ms = ex.input?.['queryThreshold_ms']\
+          \ ?? ' '\n\n  const maxDuration = fetch_spans.records[0].maxDuration ? fetch_spans.records[0].maxDuration/1000000\
+          \ : ' ';\n  const correlationId = trigger['dt.event.correlation_id'] ??\
+          \ undefined;\n  const spanName = fetch_spans.records[0]['span.name'] ??\
+          \ ' ';\n  const dbSystem = fetch_spans.records[0]['db.system'] ?? ' ';\n\
+          \  const serverAddress = fetch_spans.records[0]['server.address'] ?? ' ';\n\
+          \  const serverPort = fetch_spans.records[0]['server.port'] ?? ' ';\n  const\
+          \ dbNamespace = fetch_spans.records[0]['db.namespace'] ?? ' ';\n  const\
+          \ dbQueryText = fetch_spans.records[0]['db.query.text'] ?? ' ';\n\n  const\
+          \ query = `fetch spans | filter matchesValue(dt.entity.service, \"${sourceEntity}\"\
+          ) and span.kind == \"client\" and code.function == \"query\" | filter span.name\
+          \ == \"${spanName}\" and db.system == \"${dbSystem}\" | maketimeseries by:\
+          \ { span.name, db.system  }, {maxDuration=max(duration)}`;\n\n  const workflow\
+          \ = getTaskExecutionLink();\n  // Get the current environment URL\n  const\
+          \ environmentUrl = workflow.replace(/(https:\\/\\/[^/]+)\\/.*/,\"$1\");\n\
+          \n  const newEvent = {\n    eventType: 'WARNING',\n    title: `Database\
+          \ not monitored`,\n    timeout: 0,\n    properties: {\n      'event.description':\
+          \ `Unable to match span data with database monitoring. Likely database monitoring\
+          \ is not setup.`\n        + `\\n\\nDatabase: ${serverAddress}:${serverPort}/${dbNamespace}`\n\
+          \        + `\\n\\nClick [here](${environmentUrl}/ui/apps/dynatrace.database.overview)\
+          \ to go to the Databases app to setup database monitoring.`,\n      'dt.event.correlation_tag':\
+          \ correlationId,\n      // 'dt.query': query,\n      'chart.query': query,\n\
+          \      'dt.source_entity': sourceEntity,\n      'dt.entity.service': sourceEntity,\n\
+          \      'workflow': workflow,\n      'remediation_step': 'Span-Database Linking',\n\
+          \    },\n  };\n\n  console.log(\"emit_db_root_cause:\",{newEvent, serviceName,\
+          \ sourceEntity, correlationId, query, maxDuration })\n  return await eventsClient.createEvent({\
+          \ body: newEvent });\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 1
+        y: 4
+      conditions:
+        custom: '{{result("fetch_from_db_monitoring")["records"]|length == 0}}'
+        states:
+          fetch_from_db_monitoring: OK
+      description: If fetch_from_db_monitoring does not return a result, then emit
+        an event asking user to enable monitoring
+      predecessors:
+      - fetch_from_db_monitoring

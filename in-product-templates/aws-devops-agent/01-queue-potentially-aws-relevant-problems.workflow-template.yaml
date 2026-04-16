@@ -1,0 +1,47 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.biz.explore
+      version: ^1.35.0
+  inputs: []
+workflow:
+  title: 01_Queue potentially AWS-relevant problems
+  description: version=v9,cid=051f4c9ffc08d1bcf9ee4115a8f6cb1bcb68040f
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            error: true
+            slowdown: true
+            availability: true
+          entityTags: {}
+          customFilter: ''
+          onProblemClose: false
+          entityTagsMatch: null
+          analysisReady: false
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 50
+  guide: The workflow triggers on the arrival of a problem of type `Error`, `Slowdown`,
+    or `Availability` and in active status. It queues the problem for further analysis.
+  tasks:
+    queue_for_analysis:
+      name: queue_for_analysis
+      input:
+        from: JSON
+        json: "{\n  \"problemId\":\"{{event()[\"event.id\"]}}\"\n}"
+        eventType: readyForAnalysis
+        eventCategory: awsDevOpsAgent
+        eventProvider: dynatrace
+      action: dynatrace.biz.explore:ingestbizevent
+      position:
+        x: 0
+        y: 1
+      description: Queue Dynatrace Problem for further analysis
+      predecessors: []

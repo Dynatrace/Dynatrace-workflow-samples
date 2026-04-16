@@ -1,0 +1,146 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.biz.explore
+      version: ^1.35.0
+  inputs: []
+workflow:
+  title: 05_Handle AWS DevOps Agent investigation completed responses
+  description: version=v9,cid=051f4c9ffc08d1bcf9ee4115a8f6cb1bcb68040f
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: event
+        value:
+          query: "not isNull(problemEventId) and eventType == \"TASK_UPDATED\" and\n\
+            \        matchesPhrase(task, \"\\\"status\\\":\\\"COMPLETED\\\"\") and\
+            \ matchesPhrase(task,\n        \"\\\"metadata\\\":null\")"
+          eventType: events
+  result: null
+  type: STANDARD
+  input:
+    taskId: ''
+    taskVersion: ''
+    problemEventId: ''
+    credentialVaultId: credentialVaultId_REPLACE_ME
+    awsDevOpsAgentEndpoint: awsDevOpsAgentEndpoint_REPLACE_ME
+  hourlyExecutionLimit: 50
+  guide: 'This workflow runs whenever an AWS DevOps Agent investigation concludes.
+    It will trigger the mitigation action process in AWS DevOps Agent.
+
+
+    Please check the guide in workflow `03_Check eligibility and invoke AWS DevOps
+    Agent` for all relevant details.'
+  tasks:
+    report_processed:
+      name: report_processed
+      input:
+        from: JSON
+        json: "{\n  \"problemId\":\"{{ event()[\"problemEventId\"] }}\"\n}"
+        eventType: mitigationRequested
+        eventCategory: awsDevOpsAgent
+        eventProvider: dynatrace
+      action: dynatrace.biz.explore:ingestbizevent
+      position:
+        x: 1
+        y: 3
+      conditions:
+        else: SKIP
+        custom: '{{ input()["problemEventId"] == "" }}'
+        states:
+          start_mitigation: OK
+      description: Tag Dynatrace Problem as mitigationRequested
+      predecessors:
+      - start_mitigation
+    start_mitigation:
+      name: start_mitigation
+      input:
+        script: "import { execution } from \"@dynatrace-sdk/automation-utils\";\n\
+          import crypto from \"crypto\";\nimport { credentialVaultClient } from \"\
+          @dynatrace-sdk/client-classic-environment-v2\";\nimport { getEnvironmentId\
+          \ } from \"@dynatrace-sdk/app-environment\";\nimport { queryExecutionClient\
+          \ } from \"@dynatrace-sdk/client-query\";\n\nconst DEBUG = true;\n\nconst\
+          \ generateHMACSignature = (payload, secret) => {\n  const hmac = crypto.createHmac(\"\
+          sha256\", secret);\n  hmac.update(payload, \"utf8\");\n  return hmac.digest(\"\
+          base64\");\n};\n\nexport default async function ({ executionId }) {\n  const\
+          \ ex = await execution(executionId);\n\n  if (\n    ex.input.credentialVaultId\
+          \ === undefined ||\n    ex.input.credentialVaultId.trim() === \"\"\n  )\
+          \ {\n    throw Error(\n      \"input credentialVaultId is not set. Set the\
+          \ variable to the id of the Dynatrace Credentials vault object you want\
+          \ to use, e.g., CREDENTIALS_VAULT-C7C90126135BA4AC\"\n    );\n  }\n\n  if\
+          \ (\n    ex.input.awsDevOpsAgentEndpoint === undefined ||\n    ex.input.awsDevOpsAgentEndpoint.trim()\
+          \ === \"\"\n  ) {\n    throw Error(\n      \"input awsDevOpsAgentEndpoint\
+          \ is not set. Set the variable to the AgentSpace webhook url you received\
+          \ from AWS, e.g., https://event-ai.us-east-1.api.aws/webhook/dynatrace/700a959c-c124-43c8-963a-0140caca163e\"\
+          \n    );\n  }\n\n  try {\n    new URL(ex.input.awsDevOpsAgentEndpoint);\n\
+          \  } catch (e) {\n    throw Error(\n      `input awsDevOpsAgentEndpoint\
+          \ value (${ex.input.awsDevOpsAgentEndpoint}) is no valid URL ${e}`\n   \
+          \ );\n  }\n\n  let credential;\n  try {\n    credential = await credentialVaultClient.getCredentialsDetails({\n\
+          \      id: ex.input.credentialVaultId,\n    });\n  } catch (e) {\n    throw\
+          \ Error(\n      `Unable to retrieve credential ${ex.input.credentialVaultId}\
+          \ from credentialVault: ${e}`\n    );\n  }\n\n  if (credential?.token ==\
+          \ null) {\n    throw Error(\n      `Token is null. Ensure the credential\
+          \ ${ex.input.credentialVaultId} is properly configured`\n    );\n  }\n\n\
+          \  let taskId = ex.input['taskId']\n  let taskVersion = ex.input['taskVersion']\n\
+          \  let problemId = ex.input['problemEventId']\n\n  if(taskId !== \"\" ||\
+          \ taskVersion !== \"\" || problemId != \"\") {\n    if(taskId != \"\" &&\
+          \ taskVersion != \"\" && problemId != \"\") {\n    } else {\n      throw\
+          \ new Error(`Please ensure to set taskId, taskVersion and problemId`)\n\
+          \    }\n  } else {\n    const eventPayload = ex.params?.event;\n    const\
+          \ task = JSON.parse(eventPayload?.task);\n    if (task == null) {\n    \
+          \  throw Error(`task is null`);\n    }\n\n    taskId = task.task_id\n  \
+          \  taskVersion = task.version\n    problemId = eventPayload[\"problemEventId\"\
+          ]\n  }\n\n  const payload = JSON.stringify({\n    \"event.type\": \"mitigation_request\"\
+          ,\n    task_id: taskId,\n    task_version: taskVersion,\n  });\n\n  if (DEBUG)\
+          \ {\n    console.log(`Invoking AgentSpace\\n${payload}`);\n  }\n\n  const\
+          \ timestamp = new Date().toISOString();\n  const signature = generateHMACSignature(`${timestamp}:${payload}`,\
+          \ credential.token);\n  const response = await fetch(ex.input.awsDevOpsAgentEndpoint,\
+          \ {\n    method: \"POST\",\n    headers: {\n      \"Content-Type\": \"application/json\"\
+          ,\n      \"x-amzn-event-signature\": signature,\n      \"x-amzn-event-timestamp\"\
+          : timestamp\n    },\n    body: payload,\n  });\n\n  if (!response.ok) {\n\
+          \    const error = `Webhook failed: ${response.status} ${response.statusText}`;\n\
+          \    throw Error(`Invoking AWS DevOps Agent API failed, ${error}`);\n  }\n\
+          \n  console.log(\n    `Successfully trigger AWS DevOps Agent mitigation\
+          \ for Dynatrace Problem ${problemId}`\n  );\n  return {\n    success: true,\n\
+          \    awsdevopsagent: {\n      body: JSON.stringify(response.body),\n   \
+          \   status: response.status,\n      statusText: response.statusText,\n \
+          \     problemId\n    },\n    status: response.status,\n  };\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 1
+        y: 2
+      conditions:
+        custom: '{{ (result("already_requested_mitigation").get("records", []) | length)
+          == 0 }}'
+        states:
+          already_requested_mitigation: OK
+      description: Request mitigation
+      predecessors:
+      - already_requested_mitigation
+    already_requested_mitigation:
+      name: already_requested_mitigation
+      input:
+        query: 'fetch bizevents, from: now()-24h
+
+          | filter event.category == "awsDevOpsAgent"
+
+          | filter event.type == "mitigationRequested"
+
+          | filter problemId == "{{ event()["problemEventId"]}}"
+
+          '
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 1
+      conditions:
+        else: SKIP
+        custom: '{{ input()["problemEventId"] == "" }}'
+        states: {}
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []

@@ -1,0 +1,167 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.kubernetes.connector
+      version: ^1.2.0
+    - id: dynatrace.msteams
+      version: ^2.2.2
+  inputs:
+  - type: connection
+    schema: app:dynatrace.msteams:connection
+    targets:
+    - tasks.send_logs_to_teams.connectionId
+workflow:
+  title: Send pod logs to Microsoft Teams
+  description: Retrieves logs from a Kubernetes pod and sends them to a Microsoft
+    Teams channel for monitoring and troubleshooting.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: false
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            availability: true
+          entityTags: {}
+          customFilter: matchesValue(k8s.workload.kind, "pod")
+          analysisReady: false
+          onProblemClose: false
+          entityTagsMatch: null
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: '# Setup
+
+
+    This workflow requires two connections:
+
+
+    **Kubernetes connection**: See https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions/kubernetes-automation/get-started-with-kubernetes-workflows
+    for detailed setup instructions.
+
+
+    **Microsoft Teams connection**: See https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions/microsoft-teams
+    for detailed setup instructions.
+
+
+    Ensure the Kubernetes connection has `get` permissions for pods in the target
+    namespace.
+
+
+    # Trigger
+
+
+    The Davis problem [trigger](?trigger) is inactive by default and filters for error
+    and availability problems.
+
+
+    To modify the trigger:
+
+    - **Filter by category**: Update **Event category** to match your monitoring needs
+
+    - **Custom filters**: Add DQL filters in **Additional custom filter** to limit
+    to specific entities or conditions
+
+
+    # Retrieve pod logs
+
+
+    In the [get_pod_logs](?task=get_pod_logs&tab=input) task, configure which logs
+    to retrieve:
+
+
+    - **Namespace**: Specify the namespace of the pod
+
+    - **Pod**: Specify the pod name
+
+    - **Container**: Leave empty for the default container, or specify a container
+    name for multi-container pods
+
+    - **Timeframe**: Specify seconds to retrieve (e.g., `300` for last 5 minutes).
+    Leave empty to retrieve all available logs
+
+
+    Logs are limited to 6MB. Use **Timeframe** to control output size.
+
+
+    # Send logs to Teams
+
+
+    In the [send_logs_to_teams](?task=send_logs_to_teams&tab=input) task, select the
+    Microsoft Teams connection where the logs will be sent.
+
+
+    The message displays pod details and log content. Logs are truncated to 4000 characters
+    for display in the Teams message.'
+  tasks:
+    get_pod_logs:
+      name: get_pod_logs
+      input:
+        pod: ''
+        container: ''
+        namespace: ''
+        connection: ''
+      action: dynatrace.kubernetes.connector:get-logs
+      position:
+        x: 0
+        y: 1
+      description: Retrieve logs from Kubernetes pod
+      predecessors: []
+    send_logs_to_teams:
+      name: send_logs_to_teams
+      input:
+        channel: ''
+        message: "{\n  \"type\": \"AdaptiveCard\",\n  \"$schema\": \"https://adaptivecards.io/schemas/adaptive-card.json\"\
+          ,\n  \"version\": \"1.6\",\n  \"body\": [\n      {\n          \"type\":\
+          \ \"ColumnSet\",\n          \"columns\": [\n              {\n          \
+          \        \"type\": \"Column\",\n                  \"width\": \"auto\",\n\
+          \                  \"horizontalAlignment\": \"Left\",\n                \
+          \  \"items\": [\n                      {\n                          \"type\"\
+          : \"TextBlock\",\n                          \"text\": \"\U0001F4CB Kubernetes\
+          \ Pod Logs Retrieved\",\n                          \"wrap\": true,\n   \
+          \                       \"style\": \"heading\"\n                      }\n\
+          \                  ]\n              }\n          ]\n      },\n      {\n\
+          \          \"type\": \"FactSet\",\n          \"facts\": [\n            \
+          \  {\n                  \"title\": \"Pod\",\n                  \"value\"\
+          : \"{{ task('get_pod_logs').input.pod or 'Not configured' }}\"\n       \
+          \       },\n              {\n                  \"title\": \"Namespace\"\
+          ,\n                  \"value\": \"{{ task('get_pod_logs').input.namespace\
+          \ or 'Not configured' }}\"\n              },\n              {\n        \
+          \          \"title\": \"Container\",\n                  \"value\": \"{{\
+          \ task('get_pod_logs').input.container or 'default' }}\"\n             \
+          \ },\n              {\n                  \"title\": \"Total Lines Retrieved\"\
+          ,\n                  \"value\": \"{{ result('get_pod_logs') | length }}\"\
+          \n              },\n              {\n                  \"title\": \"Execution\
+          \ Time\",\n                  \"value\": \"{{ execution().started_at }}\"\
+          \n              }\n          ],\n          \"separator\": true\n      },\n\
+          \      {\n          \"type\": \"Container\",\n          \"items\": [\n \
+          \             {\n                  \"type\": \"RichTextBlock\",\n      \
+          \            \"inlines\": [\n                      {\n                 \
+          \         \"type\": \"TextRun\",\n                          \"fontType\"\
+          : \"Monospace\",\n                          \"size\": \"Small\",\n     \
+          \                     \"text\": {{ result('get_pod_logs') | truncate(4000)\
+          \ | to_json }}\n                      }\n                  ]\n         \
+          \     }\n          ],\n          \"style\": \"emphasis\"\n      },\n   \
+          \   {\n          \"type\": \"TextBlock\",\n          \"text\": \"Note: Logs\
+          \ are truncated to 4000 characters for display.\",\n          \"size\":\
+          \ \"Small\",\n          \"isSubtle\": true,\n          \"wrap\": true,\n\
+          \          \"spacing\": \"Small\",\n          \"separator\": true\n    \
+          \  }{% if problem_link() %},\n      {\n          \"type\": \"ActionSet\"\
+          ,\n          \"actions\": [\n              {\n                  \"type\"\
+          : \"Action.OpenUrl\",\n                  \"title\": \"Open Problem in Dynatrace\"\
+          ,\n                  \"url\": \"{{ problem_link() }}\"\n              }\n\
+          \          ]\n      }{% endif %}\n  ]\n}\n"
+        connectionId: ''
+      action: dynatrace.msteams:send-message
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          get_pod_logs: OK
+      description: Send pod logs to Microsoft Teams channel
+      predecessors:
+      - get_pod_logs

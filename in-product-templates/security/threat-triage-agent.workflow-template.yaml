@@ -1,0 +1,1114 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.slack
+      version: ^3.4.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.slack:connection
+    targets:
+    - tasks.notify_in_slack.connection
+workflow:
+  title: Threat Triage Agent
+  description: ''
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input:
+    id: 6938577d1df39d03f2dc4345
+    tlp: white
+    name: 'React2Shell Deep Dive: CVE-2025-55182 Exploit Mechanics'
+    tags:
+    - cve-2025-55182
+    - rsc
+    - rce
+    - next.js
+    - react
+    - react2shell
+    - deserialization
+    - exploit
+    public: 1
+    created: '2025-12-09T17:08:13.495000'
+    modified: '2026-01-08T17:00:48.362000'
+    revision: 2
+    adversary: ''
+    attack_ids:
+    - T1059.007
+    - T1497.001
+    - T1082
+    - T1190
+    - T1505.003
+    - T1016
+    - T1083
+    - T1036.004
+    - T1552.001
+    - T1571
+    - T1102.002
+    - T1567.002
+    - T1012
+    - T1213
+    - T1027.002
+    - T1071.001
+    - T1046
+    - T1105
+    indicators:
+    - id: 4159244505
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://anywherehost.site/xb/runner.zip
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159111952
+      role: null
+      type: domain
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: anywherehost.site
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 3363701643
+      role: null
+      type: CVE
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: CVE-2021-4034
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4157551390
+      role: null
+      type: CVE
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: CVE-2025-55182
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244506
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 018579b001ebb8132860c26b90c12855
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244507
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 0ebc1aa375125e74354ef93eca1efbbe
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244508
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 21864fd36817d39883d7fb470cb4c53b
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244509
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 48c3ea7686ad8035490bb6110616cd32
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244510
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 53dc944dc8bf8e2c78184a09326256ea
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244511
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: e68a5a0a7b60e0a78c605d359ebcccb2
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244512
+      role: null
+      type: FileHash-MD5
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: eaa8b69bb64887abd86dacdd9a917135
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244513
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 0972859984decfaf9487f9a2c2c7f5d2b03560a0
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244514
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 1ce4b6a89d2daa0cab820711d8424a7676ef5ff2
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244515
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 20e1465fd07f0d4e19c299fb0d9af8e5ec1b21d2
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244516
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 264e1a820b8b3bbd13325955f06aff2678c69935
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244517
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 2937c58115c131ae84a1b2a7226c666f6a27ef88
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244518
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 34551bca762be99d732c0ced6ad8b0a2f7b11ad7
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244519
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 470ce679589e1c3518c3ed2b818516f27ccad089
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244520
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 5d368356bd49c4b8e3c423c10ba777ff52a4f32a
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244521
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 6e43e26fa62dfa89fe8b016dc831a9ec44507af9
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244522
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 732226c0966fe29116b147e893c35ce7df1c8f1a
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244523
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 7c8010d9ab6dfdc7a99aba7075a793260acbf2b8
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244524
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 7fe3826fc7b90e20c9fe76a7891eff350d73b6b3
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244525
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 91152e6ffe0474b06bb52f41ab3f3545ac360e64
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244526
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: be86823d73a01266b096dab1628cfa2e4ca77265
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244527
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: c67e8aa881317cb32d7c36b2e3c0c5cfa21bf5e3
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244528
+      role: null
+      type: FileHash-SHA1
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: d6e97c9783f0907f1ee9415736816e272a9df060
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4158845092
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 13675cca4674a8f9a8fabe4f9df4ae0ae9ef11986dd1dcc6a896912c7d527274
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244529
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 2cd41569e8698403340412936b653200005c59f2ff3d39d203f433adb2687e7f
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244530
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 6957c6d7f21f698d5ce6734dc00aeddc317d5875c3fd16b8b4a54259e02c46c5
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244531
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: 9352e1c12dcef49e916053d5f97fe9913e083eab44c50d1d976bf50ce1e727d9
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244532
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: a605a70d031577c83c093803d11ec7c1e29d2ad530f8e95d9a729c3818c7050d
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244533
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: a754ec3310ebbb61f2efbd52611c7cbc0a06af7ac998d46e176fa19461288460
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244534
+      role: null
+      type: FileHash-SHA256
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: b9df31875df5761c9b7506c5c8323f13ead8e033f9fdc922422b045e17e0d5e2
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4158471675
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://193.34.213.150/nuts/bolts
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4158080644
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://193.34.213.150/nuts/x86
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244550
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://anywherehost.site/xb/systemd-devd.$
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244551
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://anywherehost.site/xms/k1.sh?grep
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244552
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://anywherehost.site/xms/kill2.sh
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244553
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://anywherehost.site/xms/su
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244554
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://anywherehost.site/xms/t1.ps1
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244555
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://ax29g9q123.anondns.net
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244556
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://inerna1.site/xb/runner.zip
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244557
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://inerna1.site/xb/systemd-devd.x86_64
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244558
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://inerna1.site/xms/k1.sh
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244559
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://inerna1.site/xms/t1.ps1
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244560
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://ip.inovanet.pt/systemprofile.zip
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244561
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://keep.camdvr.org:8000/BREAKABLE_PARABLE10
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244562
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://keep.camdvr.org:8000/BREAKABLE_PARABLE5
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244563
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://keep.camdvr.org:8000/d5.sh
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244564
+      role: null
+      type: URL
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: http://superminecraft.net.br:3000/sex.sh
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4020667361
+      role: null
+      type: hostname
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: aws.orgserv.dnsnet.cloud.anondns.net
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4158983168
+      role: null
+      type: hostname
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: ax29g9q123.anondns.net
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244568
+      role: null
+      type: hostname
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: ip.inovanet.pt
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244569
+      role: null
+      type: hostname
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: keep.camdvr.org
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244571
+      role: null
+      type: hostname
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: t.cnzzs.co
+      is_active: 1
+      expiration: null
+      description: ''
+    - id: 4159244572
+      role: null
+      type: hostname
+      title: ''
+      content: ''
+      created: '2025-12-09T17:08:14'
+      indicator: tr.earn.top
+      is_active: 1
+      expiration: null
+      description: ''
+    industries: []
+    references:
+    - https://www.wiz.io/blog/nextjs-cve-2025-55182-react2shell-deep-dive
+    author_name: AlienVault
+    description: The critical Remote Code Execution vulnerability CVE-2025-55182,
+      dubbed 'React2Shell', affects React Server Components (RSC) and extends beyond
+      Next.js. Attackers are exploiting it for cloud-native initial access, credential
+      harvesting, cryptomining, and deploying sophisticated backdoors. The vulnerability
+      stems from improper input deserialization in RSC payloads, allowing arbitrary
+      code execution. Exploitation has been observed across various cloud platforms,
+      targeting containerized workloads. The exploit's mechanics involve crafting
+      a malicious payload with self-referencing gadgets to bypass security checks
+      during deserialization. Other frameworks using RSC, such as Waku and Vite, are
+      also vulnerable. Urgent patching and comprehensive detection measures are crucial
+      for affected systems.
+    extract_source: []
+    more_indicators: false
+    malware_families:
+    - Sliver
+    - XMRig
+    targeted_countries: []
+  hourlyExecutionLimit: 10
+  guide: '# Threat Triage Agent
+
+
+    Take proactive action on emerging threats. This workflow automatically breaks
+    down a threat alert into indicators of compromise and analyzes the threat exposure
+    of your environment, leveraging various data in Dynatarce.
+
+
+    # Prerequisites
+
+
+    * This workflow should be triggered as a sub-workflow with a string input that
+    represents a threat alert. See `Default input` in the [Workflow options](?options=)
+    for a sample alert.
+
+
+    # How to Setup
+
+
+    1. During the template deployment select an existing Slack connection or create
+    a new one.
+
+    2. After deploying the workflow, select the desired Slack channel in the [`notify_in_slack`](?task=notify_in_slack&tab=input)
+    task.
+
+
+    # Workflow flow
+
+
+    1. Indicators of compromise, such as IP, CVE, Domain, URL are extracted from the
+    alert.
+
+    2. Vulnerabilities, detection, logs ans spans are queried to detect any existing
+    threat exposure and compromise.
+
+    3. All the findings and evidences are summarized and reported in a Slack notification.'
+  tasks:
+    fix-json:
+      name: fix-json
+      input:
+        query: 'data record(json_string="""{{result("extract-indicators").text }}""")
+
+          | fields json_string=replaceString(json_string,"""'']"""",""""""")
+
+          | fields json_string=replaceString(json_string,"""'',",""","""",""")
+
+          | fields json_string=replaceString(json_string,""",",""",",")'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          extract-indicators: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - extract-indicators
+    query-logs:
+      name: query-logs
+      input:
+        query: "fetch logs, from:now()-24h\n| parse \"\"\"{{result(\"fix-json\").records[0][\"\
+          json_string\"]}}\"\"\", \"\"\"JSON:json_object\"\"\"\n//matched IPS\n| fieldsAdd\
+          \ IPs=json_object[IPs]\n| filter iAny(contains(content,IPs[]))\n| summarize\
+          \ by:{log.source},\n{\n  log_count=arraySize(collectArray(content)),\n \
+          \ source_entities=arrayDistinct(arrayFlatten(collectDistinct(dt.source_entity))),\n\
+          \  k8s_namespaces=collectDistinct(k8s.namespace.name),\n  dt_kubernetes_clusters=collectDistinct(dt.entity.kubernetes_cluster),\n\
+          \  k8s_clusters_uids=collectDistinct(k8s.cluster.uid),\n  k8s_cluster_names=collectDistinct(k8s.cluster.name),\n\
+          \  container_group_instances=collectDistinct(dt.entity.container_group_instance),\n\
+          \  container_groups=collectDistinct(dt.entity.container_group),\n  container_names=collectDistinct(k8s.container.name),\n\
+          \  node_names=collectDistinct(k8s.node.name),\n  hosts=collectDistinct(dt.entity.host),\n\
+          \  services=collectDistinct(dt.entity.service),\n  workload_names=collectDistinct(k8s.workload.name),\n\
+          \  pod_names=collectDistinct(k8s.pod.name),\n  pod_ids=collectDistinct(k8s.pod.uid),\n\
+          \  process_groups=collectDistinct(dt.entity.process_group),\n  processes=collectDistinct(dt.entity.process_group_instance),\n\
+          \  ec2_instances=collectDistinct(dt.entity.ec2_instance),\n  cloud_apps=collectDistinct(dt.entity.cloud_application),\n\
+          \  cloud_namespaces=collectDistinct(dt.entity.cloud_application_namespace)\n\
+          }"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 2
+        y: 3
+      conditions:
+        states:
+          fix-json: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - fix-json
+    notify_in_slack:
+      name: notify_in_slack
+      input:
+        channel: C09UVT2K7JN
+        message: Emerging threat analysis report
+        reaction: []
+        attachment:
+          type: markdown
+          title: Attachment
+          content: '{{result("summarize-threat-exposure").text}}'
+          initialComment: ''
+        connection: ''
+        workflowID: '{{ execution().workflow.id }}'
+        channelType: id
+        executionID: '{{ execution().id }}'
+        executionDate: '{{ execution().started_at }}'
+        appendToThread: false
+        replyBroadcast: false
+        selectedRequestType: 2
+        attachmentToggleValue: file
+      action: dynatrace.slack:slack-send-message
+      active: true
+      position:
+        x: 0
+        y: 5
+      conditions:
+        custom: ''
+        states:
+          summarize-threat-exposure: OK
+      description: Send a message to a Slack workspace
+      predecessors:
+      - summarize-threat-exposure
+    query-detections:
+      name: query-detections
+      input:
+        query: "fetch security.events, from:now()-7d\n| filter event.type==\"DETECTION_FINDING\"\
+          \n| fieldsAdd finding.time.created=toTimestamp(finding.time.created)\n|\
+          \ parse \"\"\"{{result(\"fix-json\").records[0][\"json_string\"]}}\"\"\"\
+          , \"\"\"JSON:json_object\"\"\"\n| filter in(actor.ips, json_object[IPs])\
+          \ or in(actor.fqdns, json_object[Domains])\n| summarize by:{object.id, object.name,\
+          \ davis_risk=dt.security.risk.level},\n{\n  detectionsNum=countDistinctExact(finding.id),\n\
+          \  minTime=takeMin(finding.time.created),\n  maxTime=takeMax(finding.time.created),\n\
+          \  detections=collectDistinct(finding.title),\n  actor.ips=arrayDistinct(arrayFlatten(collectArray(actor.ips))),\n\
+          \  actor.fqdns=arrayDistinct(arrayFlatten(collectArray(actor.fqdns))),\n\
+          \  target_entities=collectDistinct(dt.source_entity),\n  target_names=collectDistinct(dt.security.rap.target.name),\n\
+          \  k8s_namespaces=collectDistinct(k8s.namespace.name),\n  dt_kubernetes_clusters=collectDistinct(dt.entity.kubernetes_cluster),\n\
+          \  k8s_clusters_uids=collectDistinct(k8s.cluster.uid),\n  k8s_cluster_names=collectDistinct(k8s.cluster.name),\n\
+          \ container_group_instances=collectDistinct(dt.entity.container_group_instance),\n\
+          \ container_groups=collectDistinct(dt.entity.container_group),\n container_names=collectDistinct(k8s.container.name),\n\
+          \ node_names=collectDistinct(k8s.node.name),\n cloud_application_namespaces=collectDistinct(related_entities.cloud_application_namespaces.ids),\n\
+          \ cloud_applications=collectDistinct(related_entities.cloud_applications.ids),\n\
+          \ cloud_application_instances=collectDistinct(related_entities.cloud_application_instances.ids),\n\
+          \ hosts=collectDistinct(dt.entity.host),\n services=collectDistinct(related_entities.services.ids),\n\
+          \ service_instances=collectDistinct(related_entities.service_instances.ids),\n\
+          \ workload_names=collectDistinct(k8s.workload.name),\n pod_names=collectDistinct(k8s.pod.name),\n\
+          \ pod_ids=collectDistinct(k8s.pod.uid),\n processes=collectDistinct(dt.entity.process_group),\n\
+          \ aws_arns=collectDistinct(aws.arn),\n azure_ids=collectDistinct(azure.resource.id)\n\
+          }"
+      action: dynatrace.automations:execute-dql-query
+      active: true
+      position:
+        x: -1
+        y: 3
+      conditions:
+        states:
+          fix-json: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - fix-json
+    extract-indicators:
+      name: extract-indicators
+      input:
+        config: disabled
+        prompt: 'Extract behavioral and non-behavioral indicator of compromise from
+          the provided alert from the context.
+
+          Group the indicators into: IPs, CVEs, Domains, URLs, Libraries, and Hosts.
+
+          Also add Report field with a json object having the name and tags of the
+          reported alert extracted from the input data.
+
+
+          Extraction logic:
+
+          Extract the full URL from the string. Only return the URL inside the single
+          quotes, and exclude any trailing characters like '' or ] or ",.
+
+          Also decode HTML entities like &amp; into &.
+
+          The data may be in STIX format, and the values of patterns should be extracted
+          correclty.
+
+          Avoid setting a value of an indicator with '' or , characters inside.
+
+
+          Before providing the output, validate the output based on the following
+          guidelines:
+
+          SAMPLE input: "[url:value = ''http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w64&stage=true'']"
+
+          BAD OUTPUT to avoid: "http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w64&stage=true'']","
+
+          GOOD OUTPUT: "http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w64&stage=true"
+
+
+          From this example: "[url:value = ''http://microsoft-symantec.art:8848/slt||wget'']",
+          the extracted value should be: "http://microsoft-symantec.art:8848/slt||wget".
+
+
+          Before providing the output, validate every URL extracted is a valid URL
+          and remove any of the following characters from URLs: '' , ]
+
+
+          IMPORTANT:
+
+          DO NOT start the text output with ``` or ```json and do not end it with
+          ```. Just pure JSON string.
+
+          Ensure validity of the generated JSON and avoid putting empty strings as
+          values or a value like: ",'
+        autoTrim: false
+        supplementary: "Alert indicators:\n{{input()}}\n\nSample output:\n{\n  \"\
+          CVEs\": [\"CVE-123-21323\", \"CVE-213-12321\"],\n  \"Domains\": [\"domain.com\"\
+          , \"bestdomain.com\"]\n}\n\nIncorrect output to avoid:\n{\n\"URLs\": [\n\
+          \    \"http://103.215.77.214:4444\",\n    \"http://103.215.77.214:6665\"\
+          ,\n    \"http://103.215.77.214:8080/3.asmx\",\n    \"http://microsoft-symantec.art:8848\"\
+          ,\n    \"http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w32&stage=true']\"\
+          ,\",\n    \"http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w64&stage=true']\"\
+          ,\",\n    \"http://microsoft-symantec.art:8848/slt\",\n    \"http://microsoft-symantec.art:8848/slt||wget\"\
+          ,\n    \"http://microsoft-symantec.art:8848/swt\",\n    \"http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w32&stage=true\"\
+          \n  ]\n}\nIt is wrong because \"http://microsoft-symantec.art:8848/?h=microsoft-symantec.art&p=8848&t=tcp&a=w32&stage=true']\"\
+          ,\", is not a valid JSON value."
+      retry:
+        count: 2
+        delay: 45
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      active: true
+      position:
+        x: 0
+        y: 1
+      conditions:
+        states: {}
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors: []
+    query-inbound-spans:
+      name: query-inbound-spans
+      input:
+        query: "fetch spans, from:now()-24h\n| filter request.is_root_span == true\n\
+          | filter span.kind == \"server\"\n| parse \"\"\"{{result(\"fix-json\").records[0][\"\
+          json_string\"]}}\"\"\", \"\"\"JSON:json_object\"\"\"\n//matched IPS\n| filter\
+          \ in(request_attribute.ClientIP, json_object[IPs]) or in(request_attribute.SourceIP,\
+          \ json_object[IPs])\n| summarize by:{request_attribute.ClientIP, request_attribute.SourceIP},\n\
+          {\n  target_endpoints=collectDistinct(endpoint.name),\n  target_http_hosts=collectDistinct(http.request.header.host),\n\
+          \  target_server_names=collectDistinct(http.server_name),\n  target_urls_full=collectDistinct(url.full),\n\
+          \  target_uris=collectDistinct(url.path),\n  target_entities=collectDistinct(dt.source_entity),\n\
+          \  k8s_namespaces=collectDistinct(k8s.namespace.name),\n  dt_kubernetes_clusters=collectDistinct(dt.entity.kubernetes_cluster),\n\
+          \  k8s_clusters_uids=collectDistinct(k8s.cluster.uid),\n  k8s_cluster_names=collectDistinct(k8s.cluster.name),\n\
+          \ container_group_instances=collectDistinct(dt.entity.container_group_instance),\n\
+          \ container_groups=collectDistinct(dt.entity.container_group),\n container_names=collectDistinct(k8s.container.name),\n\
+          \ node_names=collectDistinct(k8s.node.name),\n hosts=collectDistinct(dt.entity.host),\n\
+          \ services=collectDistinct(dt.entity.service),\n workload_names=collectDistinct(k8s.workload.name),\n\
+          \ pod_names=collectDistinct(k8s.pod.name),\n pod_ids=collectDistinct(k8s.pod.uid),\n\
+          \ process_groups=collectDistinct(dt.entity.process_group),\n processes=collectDistinct(dt.entity.process_group_instance),\n\
+          \ ec2_instances=collectDistinct(dt.entity.ec2_instance)\n}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 3
+      conditions:
+        states:
+          fix-json: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - fix-json
+    query-outbound-spans:
+      name: query-outbound-spans
+      input:
+        query: "fetch spans, from:now()-24h\n| filter request.is_root_span == true\n\
+          | filter span.kind == \"client\"\n| parse \"\"\"{{result(\"fix-json\").records[0][\"\
+          json_string\"]}}\"\"\", \"\"\"JSON:json_object\"\"\"\n| fieldsAdd ips=iCollectArray(toIp(json_object[IPs][]))\n\
+          //matched IPS\n| filter in(server.resolved_ips, ips) or iAny(contains(url.full,json_object[Domains][]))\
+          \ or iAny(contains(url.full,json_object[Hosts][]))\n| summarize by:{endpoint.name,\
+          \ url.full, server.resolved_ips}, {\n  target_entities=collectDistinct(dt.source_entity),\n\
+          \  k8s_namespaces=collectDistinct(k8s.namespace.name),\n  dt_kubernetes_clusters=collectDistinct(dt.entity.kubernetes_cluster),\n\
+          \  k8s_clusters_uids=collectDistinct(k8s.cluster.uid),\n  k8s_cluster_names=collectDistinct(k8s.cluster.name),\n\
+          \ container_group_instances=collectDistinct(dt.entity.container_group_instance),\n\
+          \ container_groups=collectDistinct(dt.entity.container_group),\n container_names=collectDistinct(k8s.container.name),\n\
+          \ node_names=collectDistinct(k8s.node.name),\n hosts=collectDistinct(dt.entity.host),\n\
+          \ services=collectDistinct(dt.entity.service),\n workload_names=collectDistinct(k8s.workload.name),\n\
+          \ pod_names=collectDistinct(k8s.pod.name),\n pod_ids=collectDistinct(k8s.pod.uid),\n\
+          \ process_groups=collectDistinct(dt.entity.process_group),\n processes=collectDistinct(dt.entity.process_group_instance),\n\
+          \ ec2_instances=collectDistinct(dt.entity.ec2_instance)\n}"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          fix-json: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - fix-json
+    query-vulnerabilities:
+      name: query-vulnerabilities
+      input:
+        query: "fetch security.events, from:now()-2h\n| filter event.type==\"VULNERABILITY_STATE_REPORT_EVENT\"\
+          \n| filter event.level==\"ENTITY\"\n| parse \"\"\"{{result(\"fix-json\"\
+          ).records[0][\"json_string\"]}}\"\"\", \"\"\"JSON:json_object\"\"\"\n| filter\
+          \ in(vulnerability.references.cve, json_object[CVEs])\n| summarize by:{dt.source_entity=affected_entity.id,\
+          \ affected_entity.name, davis_risk=vulnerability.davis_assessment.level},\n\
+          {\n vulnerabilitiesCount=countDistinctExact(vulnerability.id),\n vulnerabilities=collectDistinct(vulnerability.title),\n\
+          \ CVEs=arrayDistinct(arrayFlatten(collectDistinct(vulnerability.references.cve))),\n\
+          \ vulnerable_components=collectDistinct(affected_entity.vulnerable_component.package_name),\n\
+          \ vulnerable_component_names=collectDistinct(affected_entity.vulnerable_component.name),\n\
+          \ kubernetes_clusters=collectDistinct(related_entities.kubernetes_clusters.ids),\n\
+          \ container_group_instances=collectDistinct(related_entities.container_group_instances.ids),\n\
+          \ cloud_application_namespaces=collectDistinct(related_entities.cloud_application_namespaces.ids),\n\
+          \ cloud_applications=collectDistinct(related_entities.cloud_applications.ids),\n\
+          \ cloud_application_instances=collectDistinct(related_entities.cloud_application_instances.ids),\n\
+          \ hosts=collectDistinct(related_entities.hosts.ids),\n services=collectDistinct(related_entities.services.ids),\n\
+          \ service_instances=collectDistinct(related_entities.service_instances.ids),\n\
+          \ reachable_data_assets=collectDistinct(affected_entity.reachable_data_assets.ids)\n\
+          }"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -2
+        y: 3
+      conditions:
+        states:
+          fix-json: OK
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors:
+      - fix-json
+    summarize-threat-exposure:
+      name: summarize-threat-exposure
+      input:
+        config: dynatrace
+        prompt: "Summarize threat exposure for the threat alert mentioned in the context\
+          \ based on the vulnerabilities, detections, logs and spans (specified in\
+          \ the context) matched to the indicator of compromises extracted from the\
+          \ report.\nList explicitly all the affected and related entity names and\
+          \ their IDs in a format name(ID).\nList explicitly all the indicator of\
+          \ compromise form the original report by type in 2 tables: one with the\
+          \ matched indicators, the other one with not matched ones.\nIn the summary\
+          \ also list the vulnerable component names and their extracted versions\
+          \ to be upgraded, and paths or the components.\n\n1. Start the report from\
+          \ the threat summary with the AI-Threat-Exposure-Score (0-100%) to represent\
+          \ the severity and risk associated with the threat towards exposure of your\
+          \ environment.\n-- Include threat name and tags.\n-- Explain the score criteria\n\
+          2. Continue with summary per data category:\n-- For vulnerabilities: list\
+          \ matched indicators, such as CVEs or packages/libararies, vulnerable components\
+          \ and recommend the possible remediation.\n-- For the detections: list the\
+          \ matched indicators, such as IPs, URLs, and recommend to further investigate\
+          \ the affected resources and potentially isolating them.\n-- For logs and\
+          \ spans apply similar recommendations as with detections.\n3. Then provide\
+          \ details of vulnerabilities by CVE if found any matches.\n  - Specify the\
+          \ affected software components and their versions. If no vulnerabilities\
+          \ are found specify that explicitly.\n  - Summarize number of entities affected\
+          \ in your environment by those vulnerabilities.\n4. Then provide details\
+          \ of matched IP, URL or domain if found any matches in detections, logs\
+          \ or spans.\n  - Specify the actor ips or fqdns matched for the detection.\
+          \ If no detections are found specify that explicitly.\n  - Summarize the\
+          \ number of matched detections, spans or logs per indicator.\n5. Include\
+          \ Dynatrace DQL query from the context used to query each category of findings.\n\
+          \   Important: do not manipulate the queries, take them as they are in the\
+          \ context. Include all the content, without cutting anything out.\n\n* Include\
+          \ a table of the affected and related entity names and ids in the format\
+          \ name(ID) for each section.\n\nNote: when an entity mentioned, try to add\
+          \ a link to the entity name(id):\n## Entity links\n* host --> {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Hosts?fullPageId=<host-id>\n\
+          * kubernetes node --> {{environment().url}}/ui/apps/dynatrace.kubernetes/smartscape/K8S_NODE?detailsId=<k8s-node-id>\n\
+          * kubernetes cluster --> {{environment().url}}/ui/apps/dynatrace.kubernetes/smartscape/K8S_CLUSTER?detailsId=<k8s-cluster-id>\n\
+          * ec2 instance --> {{environment().url}}/ui/apps/dynatrace.clouds/smartscape?perspective=health&detailsId=<aws-ec2-id>\n\
+          * process group instance --> {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Processes?perspective=Health&fullPageId=<pg-instance-id>\n\
+          * process group --> {{environment().url}}/ui/apps/dynatrace.infraops/explorer/Processes?filtering=%22Process+group+id%22+%3D+<pg-id>\n\
+          Note: <host-id>,<k8s-node-id>, <k8s-cluster-id>, <aws-ec2-id>, <pg-instance-id>,\
+          \ <pg-id> are just placeholders, which need to be replaced with the proper\
+          \ entity ID.\n\n\n## OUTPUT Guidance\n* List all the details to not cut\
+          \ information.\n* Use tables where relevant to easier data representation.\n\
+          * Respond in a markdown format and use tables where relevant.\n* When outputing\
+          \ markdown, do not include ```markdown in the beginning or ``` at the end,\
+          \ output pure markdown."
+        autoTrim: false
+        instruction: ''
+        supplementary: 'INPUT Threat alert: {{result("fix-json").records[0]}}
+
+          ------------------------------------------------------------------
+
+          Vulnerabilities DQL query: {{result("query-vulnerabilities")["metadata"]["grail"]["query"]
+          | replace(''\n'', ''\\n'')}}
+
+
+          Vulnerabilities found: {{result("query-vulnerabilities").records}}
+
+          -------------------------------------------------------------------
+
+
+          Detections DQL query: {{result("query-detections")["metadata"]["grail"]["query"]
+          | replace(''\n'', ''\\n'')}}
+
+
+          Detections found: {{result("query-detections").records}}
+
+          -------------------------------------------------------------------
+
+
+          Outbound spans DQL query: {{result("query-outbound-spans")["metadata"]["grail"]["query"]
+          | replace(''\n'', ''\\n'')}}
+
+
+          Outbound spans found: {{result("query-outbound-spans").records}}
+
+          -------------------------------------------------------------------
+
+
+          Inbount spans DQL query: {{result("query-inbound-spans")["metadata"]["grail"]["query"]
+          | replace(''\n'', ''\\n'')}}
+
+
+          Inbound spans found: {{result("query-inbound-spans").records}}
+
+          -------------------------------------------------------------------
+
+
+          Logs DQL query: {{result("query-logs")["metadata"]["grail"]["query"] | replace(''\n'',
+          ''\\n'')}}
+
+
+          Logs found: {{result("query-logs").records}}
+
+          -------------------------------------------------------------------
+
+
+          ## Analysis guidance
+
+          * If vulnerabilities exist but no detections, logs or spans, the exposure
+          score should be lower than when there are vulnerabilities with detections,
+          logs or spans.
+
+          * If detections, logs or spans exist, it is a stronger indicator for higher
+          exposure than only vulnerabilities.
+
+          * Any evidence of logs, spans or detections should provide at least 80%
+          score.
+
+          * If there are multiple logs, spans or detections the score would be higher
+          than 90%.
+
+          * Apply the fine tuning of the score according to the severity or risk of
+          the threat alert and its affect on the environment.
+
+
+
+          List all the affected and related entities directly in the response.'
+      retry:
+        count: 2
+        delay: 30
+        failedLoopIterationsOnly: true
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 4
+      conditions:
+        states:
+          query-logs: OK
+          query-detections: OK
+          query-inbound-spans: OK
+          query-outbound-spans: OK
+          query-vulnerabilities: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - query-detections
+      - query-outbound-spans
+      - query-inbound-spans
+      - query-vulnerabilities
+      - query-logs

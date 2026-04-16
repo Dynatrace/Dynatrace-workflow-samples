@@ -1,0 +1,146 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.email
+      version: ^1.9.0
+  inputs: []
+workflow:
+  title: Send Email with aggregated log summary
+  description: ''
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Send email notifications for error logs with distributed trace links\n\
+    \nThis workflow detects error logs, groups them by content pattern, and sends\
+    \ an email notification with clickable links to distributed traces for quick troubleshooting.\n\
+    \n# Setup\n\nNo additional setup or connection is required to send emails from\
+    \ this workflow.\n\nFor detailed configuration options, see [Send email action](https://dt-url.net/9022zbt).\n\
+    \n# Trigger\n\nBy default, this workflow uses an on-demand [trigger](?trigger=).\
+    \ You can leave it as-is to trigger the workflow manually or via API.\n\nYou can\
+    \ update the trigger to run on a schedule (for example, hourly or daily at a specific\
+    \ time) to automatically monitor for error logs.\n\n# Acquire tenant information\n\
+    \nThe task [acquire_tenant_information](?task=acquire_tenant_information) retrieves\
+    \ the environment URL using the Dynatrace SDK. This URL is used later to construct\
+    \ clickable trace links in the email notification.\n\nNo configuration is required\
+    \ for this task.\n\n# Query error logs\n\nThe task [fetch_log_summary](?task=fetch_log_summary&tab=input)\
+    \ runs a DQL query that:\n- Fetches error logs from the last 24 hours\n- Filters\
+    \ by `ERROR` level\n- Groups logs by the first 23 characters of the content\n\
+    - Captures the latest timestamp, trace ID, and event count for each group\n\n\
+    You can customize the query:\n- **Time range**: Change `from:now() - 24h` to a\
+    \ different period (for example, `12h` or `48h`)\n- **Log level**: Add other levels\
+    \ like `WARN` by extending the filter: `matchesValue(level, \"ERROR\") OR matchesValue(level,\
+    \ \"WARN\")`\n- **Result limit**: Adjust `limit 20` to show more or fewer log\
+    \ groups\n\n# Configure the email\n\nIn the task [send_log_summary](?task=send_log_summary&tab=input),\
+    \ configure who receives the notification and what it contains.\n\n- **Recipients**:\n\
+    \  Update the **To** field with one or more recipients, for example:\n  ```code\n\
+    \  oncall@example.com, sre-team@example.com\n  ```\n  Optionally, add **CC** or\
+    \ **BCC** recipients for additional visibility.\n\n- **Subject** (default):\n\
+    \  ```code\n  Error Log Summary\n  ```\n  You can customize it to include specific\
+    \ information\n\n- **Body**: The email contains a table with:\n  - **Group Key**:\
+    \ First 23 characters of log content to identify similar errors\n  - **Latest\
+    \ Occurrence**: Timestamp of the most recent log entry\n  - **Event Count**: Number\
+    \ of logs in this group\n  - **Sample Message**: Truncated example of the log\
+    \ content (up to 160 characters)\n  - **TraceId**: Clickable link that opens the\
+    \ distributed trace overview in Dynatrace\n\n  The trace link automatically includes\
+    \ the correct timestamp and trace ID for immediate investigation.\n\n# Customization\
+    \ examples\n\n**Group by different content length**:\nIn the DQL query [fetch_log_summary](?task=fetch_log_summary&tab=input),\
+    \ change the substring length to group logs differently:\n```code\nfirstPartOfTheContent\
+    \ = substring(content, from:0, to:50)\n```\n\n**Adjust message truncation**:\n\
+    In the task [send_log_summary](?task=send_log_summary&tab=input), modify the message\
+    \ body to show more or less of the sample message:\n```code\n{{ (r[\"exampleContent\"\
+    ] or \"N/A\") | replace(\"\\n\",\" \") | truncate(250, True, '…') }}\n```\n\n\
+    **Filter by specific services**:\nAdd a filter in the DQL query to focus on logs\
+    \ from particular services:\n```code\n| filter matchesValue(k8s.deployment.name,\
+    \ \"my-service\")\n```"
+  tasks:
+    send_log_summary:
+      name: send_log_summary
+      input:
+        cc: []
+        to: []
+        bcc: []
+        content: '{% set res = result("fetch_log_summary") %}
+
+
+          {% set rows = res["records"] if res and "records" in res else [] %}
+
+          {% if rows and rows|length > 0 %}
+
+          Top log groups (grouped by first 23 characters of content)
+
+
+          Group Key | Latest Occurrence | Event Count | Sample Message (latest) |
+          TraceId
+
+          --- | --- | --- | --- | ---
+
+          {% for r in rows %}
+
+          {{ (r["firstPartOfTheContent"] or "N/A") | replace("\n"," ") }} | {{ r["latestTimestamp"]
+          }} | {{ r["eventCount"] }} | {{ (r["exampleContent"] or "N/A") | replace("\n","
+          ") | truncate(160, True, ''…'') }} | [{{ r["exampleTraceId"] }}]({{ result("acquire_tenant_information")["tenantUrl"]
+          }}/ui/intent/dynatrace.distributedtracing/view-trace#{"timestamp"%3A"{{
+          r["latestTimestamp"] }}"%2C"dt.segments"%3A[]%2C"trace.id"%3A"{{ r["exampleTraceId"]
+          }}"%2C"span.id"%3A""})
+
+          {% endfor %}
+
+          {% else %}
+
+          No aggregated log results for the selected window.
+
+          {% endif %}'
+        subject: Error Log Summary
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          fetch_log_summary: OK
+      description: Send log summary via email
+      predecessors:
+      - fetch_log_summary
+    fetch_log_summary:
+      name: fetch_log_summary
+      input:
+        query: "fetch logs, bucket:{\"default_logs\"}, from:now() - 24h\n| filter\
+          \ matchesValue(level, \"ERROR\") OR matchesValue(loglevel, \"ERROR\")\n\
+          | filter dt.tenant.uuid == \"{{ result(\"acquire_tenant_information\").tenantId\
+          \ }}\"\n| summarize by:{dt.tenant.uuid, level, firstPartOfTheContent = substring(content,\
+          \ from:0, to:23)},\n    {latestTimestamp = max(timestamp),\n     exampleTraceId\
+          \ = max(trace_id),\n     eventCount = count(),\n     exampleContent = max(content)}\n\
+          | fields latestTimestamp, dt.tenant.uuid, eventCount, firstPartOfTheContent,\
+          \ exampleContent, exampleTraceId, status = level\n| sort eventCount desc\n\
+          | limit 20\n"
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          acquire_tenant_information: OK
+      description: Fetch the default log errors from the last 24 hours
+      predecessors:
+      - acquire_tenant_information
+    acquire_tenant_information:
+      name: acquire_tenant_information
+      input:
+        script: "import { execution } from '@dynatrace-sdk/automation-utils';\nimport\
+          \ { getEnvironmentUrl } from '@dynatrace-sdk/app-environment';\n\nexport\
+          \ default async function ({ execution_id }) {\n  // Get tenant URL\n  const\
+          \ tenantUrl = getEnvironmentUrl();\n\n  // Extract tenant ID from URL\n\
+          \  const url = new URL(tenantUrl);\n  const tenantId = url.hostname.split('.')[0];\n\
+          \n  return {\n    tenantUrl: tenantUrl,\n    tenantId: tenantId\n  };\n}"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: 0
+        y: 1
+      description: Fetch the environment URL and  ID
+      predecessors: []

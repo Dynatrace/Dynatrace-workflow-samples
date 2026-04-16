@@ -1,0 +1,104 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.email
+      version: ^1.9.0
+    - id: dynatrace.redhat.ansible
+      version: ^2.2.1
+  inputs: []
+workflow:
+  title: Trigger Ansible Job Template for Problem Events
+  description: This workflow template triggers an Ansible Job Template when a problem
+    event of type "SLOWDOWN" is detected.
+  schemaVersion: 4
+  trigger:
+    eventTrigger:
+      isActive: true
+      triggerConfiguration:
+        type: davis-problem
+        value:
+          categories:
+            slowdown: true
+          entityTags: {}
+          customFilter: ''
+          onProblemClose: false
+          entityTagsMatch: all
+          analysisReady: false
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: "# Setup\n\nYou need to setup a connection the Red Hat Ansible Automation\
+    \ Controller. \nFor details on how to configure the connection, see [Red Hat Ansible\
+    \ connection](https://dt-url.net/a303xin).\n\n# Trigger\n\nBy default, this workflow\
+    \ uses a problem [trigger](?trigger=) that triggers on events of category \"SLOWDOWN\"\
+    .\n\nTo modify the trigger:\n- **Problem state**: Choose `active` to notify only\
+    \ when problems open or reopen, or `active or closed` to also notify when problems\
+    \ resolve.\n- **Event category**: Keep `SLOWDOWN`, or add other categories like\
+    \ `ERROR`, `SLOWDOWN`, `RESOURCE`, `CUSTOM`, `MONITORING_UNAVAILABLE`, or `INFO`.\n\
+    - **Affected entities**: Use entity tags to limit notifications to specific services,\
+    \ applications, or hosts.\n\n# Configure the launch-job-template action\n\nThe\
+    \ [provision_additional_servers](?task=provision_additional_servers&tab=input)\
+    \ task launches an Ansible job template. Configure the task with the ID of the\
+    \ job template you want \nto launch, and optionally pass extra variables in the\
+    \ `extraVars` field.\n  \n# Configure the get-job-status action\n\nThe [get_provisioning_details_of_ansible_job](?task=get_provisioning_details_of_ansible_job&tab=input)\
+    \ task retrieves the status of the Ansible job. In this task you can specify the\
+    \ job ID \nfrom the previous task, and use the result in the email content.\n\n\
+    - **Job ID**: \nThe job ID is passed from the previous task, for example:\n```code\n\
+    {{ result(\"provision_additional_servers\")[\"id\"] }}\n```    \n\n# Configure\
+    \ the email action\n\nReplace the email address in the `To` field with your recipient(s)\
+    \ and change the message content to your liking."
+  tasks:
+    send_provisioning_details:
+      name: send_provisioning_details
+      input:
+        cc: []
+        to:
+        - your.mail@domain.com
+        bcc: []
+        content: 'Ansible job summary:
+
+
+          <{{ result("get_provisioning_details_of_ansible_job")["summary_fields"]
+          }}'
+        subject: Details about Problem
+      action: dynatrace.email:send-email
+      active: true
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          get_provisioning_details_of_ansible_job: OK
+      description: Send email
+      predecessors:
+      - get_provisioning_details_of_ansible_job
+    provision_additional_servers:
+      name: provision_additional_servers
+      input:
+        extraVars: ''
+        templateId: '7'
+        awaitResult: true
+        connectionId: ''
+      action: dynatrace.redhat.ansible:launch-job-template
+      position:
+        x: 0
+        y: 1
+      description: Launch a job template in Red Hat Ansible Automation Controller
+      predecessors: []
+    get_provisioning_details_of_ansible_job:
+      name: get_provisioning_details_of_ansible_job
+      input:
+        jobId: '{{ result("provision_additional_servers")["id"] }}'
+        connectionId: ''
+      action: dynatrace.redhat.ansible:list-job-status
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          provision_additional_servers: OK
+      description: List job status of Red Hat Ansible Automation Controller
+      predecessors:
+      - provision_additional_servers

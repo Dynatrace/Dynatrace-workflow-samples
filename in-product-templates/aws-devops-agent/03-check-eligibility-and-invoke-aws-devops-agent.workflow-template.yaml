@@ -1,0 +1,232 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.biz.explore
+      version: ^1.35.0
+  inputs: []
+workflow:
+  title: 03_Check eligibility and invoke AWS DevOps Agent
+  description: version=v9,cid=051f4c9ffc08d1bcf9ee4115a8f6cb1bcb68040f
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input:
+    dryRun: false
+    toQuery: now()
+    fromQuery: now()-30d
+    problemId: ''
+    testConnection: false
+    minAWSResources: 1
+    credentialVaultId: credentialVaultId_REPLACE_ME
+    awsDevOpsAgentEndpoint: awsDevOpsAgentEndpoint_REPLACE_ME
+  hourlyExecutionLimit: 50
+  guide: "The workflow is invoked by `02_Dispatch pending analysis`. The Dynatrace\
+    \ Workflow evaluates whether the issue is potentially related to AWS. If the issue\
+    \ is determined to be AWS-related, an AWS DevOps Agent investigation is initiated;\
+    \ otherwise, the workflow concludes.\n\nThe workflow needs to be set up prior\
+    \ it can be used:\n* [Set up AWS DevOps Agent in your AWS account](https://docs.aws.amazon.com/devopsagent/latest/userguide/configuring-capabilities-for-aws-devops-agent-connecting-telemetry-sources-connecting-dynatrace.html).\n\
+    * Create Dynatrace Credential Vault item.\n* Allow workflows to communicate with\
+    \ AWS DevOps Agent endpoint.\n* Set workflow's default input variables.\n\n  \
+    \  1 Set `credentialVaultId`\n    \n    2 Set `awsDevOpsAgentEndpoint`\n\n\nFind\
+    \ all details in the [official documentation](https://docs.dynatrace.com/docs/ingest-from/amazon-web-services/aws-devops-agent).\n\
+    \nBe aware that you can also run this workflow in ad-hoc fashion. Press the play\
+    \ button and reference an existing problemId. Please check the online documentation\
+    \ for all details."
+  tasks:
+    report_processed:
+      name: report_processed
+      input:
+        from: JSON
+        json: "{\n  \"problemId\":\"{{ input()[\"problemId\"] }}\"\n}"
+        eventType: processed
+        eventCategory: awsDevOpsAgent
+        eventProvider: dynatrace
+      action: dynatrace.biz.explore:ingestbizevent
+      position:
+        x: -1
+        y: 1
+      conditions:
+        else: SKIP
+        custom: '{{ input().get("dryRun", false) == false and input().get("testConnection",
+          false) == false }}'
+        states: {}
+      description: Tag Dynatrace Problem as processed
+      predecessors: []
+    start_investigation:
+      name: start_investigation
+      input:
+        script: "import { execution } from \"@dynatrace-sdk/automation-utils\";\n\
+          import crypto from \"crypto\";\nimport { credentialVaultClient } from \"\
+          @dynatrace-sdk/client-classic-environment-v2\";\nimport { getEnvironmentId\
+          \ } from \"@dynatrace-sdk/app-environment\";\nimport { queryExecutionClient\
+          \ } from \"@dynatrace-sdk/client-query\";\n\nconst DEBUG = true;\n\nconst\
+          \ generateHMACSignature = (payload, secret) => {\n  const hmac = crypto.createHmac(\"\
+          sha256\", secret);\n  hmac.update(payload, \"utf8\");\n  return hmac.digest(\"\
+          base64\");\n};\n\nfunction mapToObject(map: Map<String, any>): any {\n \
+          \ const obj: any = {};\n  map.forEach((value, key) => {\n    if (value instanceof\
+          \ Map) {\n      obj[key.toString()] = mapToObject(value);\n    } else {\n\
+          \      obj[key.toString()] = value;\n    }\n  });\n  return obj;\n}\n\n\
+          function getEntityTypeFromId(id: String): String {\n  const parts = id.split(\"\
+          -\");\n  if (parts.length < 2) {\n    throw new Error(`Invalid entity ID:\
+          \ ${id}`);\n  }\n  return parts[0];\n}\n\nfunction buildQuery(\n  dataObject:\
+          \ String,\n  entityId: String,\n  fields: String[] = [\"runs_on\", \"calls\"\
+          ],\n  queryFrom: String,\n  toQuery: String\n): String {\n  const query\
+          \ = `fetch \\`${dataObject}\\` ${\n    queryFrom ? \", from: \" + queryFrom\
+          \ : \"\"\n  } ${\n    toQuery ? \", to: \" + toQuery : \"\"\n  } | filter\
+          \ id == \"${entityId}\" | fieldsAdd id, ${fields.join(\",\")}`;\n\n  if\
+          \ (DEBUG) {\n    console.log(`Query: ${query}`);\n  }\n  return query;\n\
+          }\n\ninterface History {\n  start: String | null;\n  depth: number;\n  paths:\
+          \ Map<String, Array<String> | Map<String, String>>;\n}\n\nfunction emptyHistory():\
+          \ History {\n  return {\n    start: null,\n    depth: 1,\n    paths: new\
+          \ Map<String, Array<String> | Map<String, String>>(),\n  };\n}\n\ntype DataObjectHint\
+          \ = {\n  follow?: boolean;\n  fields?: Array<String>;\n};\n\n// follow all\
+          \ nodes by default\nconst dataObjectHints = new Map<String, DataObjectHint>([\n\
+          \  [\"dt.entity.service\", { fields: [\"databaseHostNames\", \"runs_on\"\
+          , \"calls\"] }],\n  [\"dt.entity.process_group_instance\", { follow: false\
+          \ }],\n  [\"dt.entity.ec2_instance\", { fields: [\"arn\"] }],\n  [\"dt.entity.relational_database_service\"\
+          , { fields: [\"arn\"] }],\n  [\"dt.entity.aws_lambda_function\", { fields:\
+          \ [\"arn\"] }],\n  [\"dt.entity.cloud:aws:lambda\", { fields: [\"arn\"]\
+          \ }],\n  [\"dt.entity.aws_network_load_balancer\", { fields: [\"arn\"] }],\n\
+          \  [\n    \"dt.entity.elastic_load_balancer\",\n    {\n      fields: [\"\
+          arn\"],\n    },\n  ],\n]);\n\nasync function walk(\n  history: History,\n\
+          \  dataObject: String,\n  entityId: String,\n  fromQuery: String,\n  toQuery:\
+          \ String,\n  maxDepth: number = 5\n): Promise<History> {\n  if (!dataObject)\
+          \ {\n    const [type, id] = entityId.split(\"-\", 2);\n    dataObject =\
+          \ `dt.entity.${type.toLowerCase()}`;\n  }\n\n  const qualifiedId = `${dataObject}-${entityId}`;\n\
+          \n  if (history.depth > maxDepth) {\n    if (DEBUG) {\n      console.log(`Max\
+          \ depth reached: ${history.depth}`);\n    }\n    return history;\n  }\n\n\
+          \  if (DEBUG) {\n    console.log(`Picking up ${qualifiedId}`);\n  }\n\n\
+          \  if (history == undefined) {\n    if (DEBUG) {\n      console.log(`Creating\
+          \ new history object`);\n    }\n    history = emptyHistory();\n  }\n\n \
+          \ if (history.start == null) {\n    history.start = qualifiedId;\n  }\n\
+          \  if (history.paths.has(qualifiedId)) {\n    return history;\n  }\n\n \
+          \ const hint = dataObjectHints.get(dataObject) || {};\n  const { follow,\
+          \ fields } = hint;\n\n  if (follow == false) {\n    if (DEBUG) {\n     \
+          \ console.log(`Skipping ${qualifiedId}; it is marked as NOT follow`);\n\
+          \    }\n    return history;\n  }\n\n  const query = buildQuery(dataObject,\
+          \ entityId, fields, fromQuery, toQuery);\n  try {\n    const queryExecutionResult\
+          \ = await queryExecutionClient.queryExecute({\n      body: { query },\n\
+          \    });\n    const { requestToken } = queryExecutionResult;\n    const\
+          \ queryResults = await queryExecutionClient.queryPoll({\n      requestToken,\n\
+          \      requestTimeoutMilliseconds: 10000,\n    });\n\n    if (DEBUG) {\n\
+          \      console.log(\n        `Query result\\n Query: '${query}'\\n Result:'${JSON.stringify(\n\
+          \          queryResults\n        )}'`\n      );\n    }\n\n    const fieldsToFollow\
+          \ = [\"runs_on\", \"calls\"];\n    for (const r of queryResults.result.records)\
+          \ {\n      let nextIds = Array<Array<String>>();\n      let qualifiedNextIds:\
+          \ Array<String> = [];\n\n      for (const field of fieldsToFollow) {\n \
+          \       if (r[field]) {\n          for (const type in r[field]) {\n    \
+          \        const ids =\n              typeof r[field][type] == \"string\"\n\
+          \                ? [r[field][type]]\n                : r[field][type];\n\
+          \            for (const id of ids) {\n              nextIds.push([type,\
+          \ id]);\n              qualifiedNextIds.push(`${type}-${id}`);\n       \
+          \     }\n          }\n\n          history.paths.set(qualifiedId, qualifiedNextIds);\n\
+          \          history.depth += 1;\n          for (const [type, id] of nextIds)\
+          \ {\n            if (DEBUG) {\n              console.log(`Following ${type}-${id}`);\n\
+          \            }\n            await walk(history, type, id, fromQuery, toQuery,\
+          \ maxDepth);\n          }\n        }\n\n        if (r?.arn) {\n        \
+          \  history.paths.set(\n            qualifiedId,\n            new Map([\n\
+          \              [\"cloud\", \"aws\"],\n              [\"arn\", r.arn],\n\
+          \            ])\n          );\n        }\n\n        if (r?.databaseHostNames)\
+          \ {\n          history.paths.set(\n            qualifiedId,\n          \
+          \  new Map([\n              [\"cloud\", \"aws\", \"rds\"],\n           \
+          \   [\"hostname\", r.databaseHostNames],\n            ])\n          );\n\
+          \        }\n      }\n    }\n  } catch (e) {\n    console.log(`Warning, failed\
+          \ to walk topology. Processing still continues: ${e}`);\n  }\n\n  return\
+          \ history;\n}\n\nfunction getEntityId(qualifiedId: String): String {\n \
+          \ return qualifiedId.substring(qualifiedId.indexOf(\"-\") + 1);\n}\n\nfunction\
+          \ getAWSResources(history: History) {\n  const resources = [];\n\n  for\
+          \ (const [k, v] of history.paths) {\n    if (v instanceof Map && v.get(\"\
+          cloud\") == \"aws\") {\n      resources.push([getEntityId(k), mapToObject(v)]);\n\
+          \    }\n  }\n\n  return resources;\n}\n\nexport default async function ({\
+          \ executionId }) {\n  const ex = await execution(executionId);\n\n  if (\n\
+          \    ex.input.credentialVaultId === undefined ||\n    ex.input.credentialVaultId.trim()\
+          \ === \"\"\n  ) {\n    throw Error(\n      \"input credentialVaultId is\
+          \ not set. Set the variable to the id of the Dynatrace Credentials vault\
+          \ object you want to use, e.g., CREDENTIALS_VAULT-C7C90126135BA4AC\"\n \
+          \   );\n  }\n\n  if (\n    ex.input.awsDevOpsAgentEndpoint === undefined\
+          \ ||\n    ex.input.awsDevOpsAgentEndpoint.trim() === \"\"\n  ) {\n    throw\
+          \ Error(\n      \"input awsDevOpsAgentEndpoint is not set. Set the variable\
+          \ to the AgentSpace webhook url you received from AWS, e.g., https://event-ai.us-east-1.api.aws/webhook/dynatrace/700a959c-c124-43c8-963a-0140caca163e\"\
+          \n    );\n  }\n\n  const minAWSResources = ex.input.minAWSResources || 0\
+          \ \n  const queryFrom = ex.input.fromQuery == \"\" ?  \"now()-30d\" : ex.input.fromQuery\n\
+          \  const queryTo = ex.input.toQuery == \"\" ? \"now()\" : ex.input.toQuery\n\
+          \  const queryMaxDepth = ex.input.queryMaxDepth || 5;\n  const dryRun =\
+          \ ex.input.dryRun || false;\n  \n  try {\n    new URL(ex.input.awsDevOpsAgentEndpoint);\n\
+          \  } catch (e) {\n    throw Error(\n      `input awsDevOpsAgentEndpoint\
+          \ value (${ex.input.awsDevOpsAgentEndpoint}) is no valid URL ${e}`\n   \
+          \ );\n  }\n\n  let credential;\n  try {\n    credential = await credentialVaultClient.getCredentialsDetails({\n\
+          \      id: ex.input.credentialVaultId,\n    });\n  } catch (e) {\n    throw\
+          \ Error(\n      `Unable to retrieve credential ${ex.input.credentialVaultId}\
+          \ from credentialVault: ${e}`\n    );\n  }\n\n  if (credential?.token ==\
+          \ null) {\n    throw Error(\n      `Token is null. Ensure the credential\
+          \ ${ex.input.credentialVaultId} is properly configured`\n    );\n  }\n\n\
+          \  let eventPayload = ex.params?.event;\n\n  if (ex.input?.testConnection\
+          \ == false) {\n    if (ex.input?.problemId) {\n      const queryExecutionResult\
+          \ = await queryExecutionClient.queryExecute({\n        body: {\n       \
+          \   query: `fetch dt.davis.problems ${\n            queryFrom ? \", from:\
+          \ \" + queryFrom : \"\"\n          } ${queryFrom ? \", to: \" + queryTo\
+          \ : \"\"} | filter event.id == \"${\n            ex.input?.problemId\n \
+          \         }\"`,\n        },\n      });\n      const { requestToken } = queryExecutionResult;\n\
+          \      const queryResults = await queryExecutionClient.queryPoll({\n   \
+          \     requestToken,\n        requestTimeoutMilliseconds: 10000,\n      });\n\
+          \n      if (queryResults?.result?.records?.length > 0) {\n        eventPayload\
+          \ = queryResults.result.records[0];\n      } else {\n        throw Error(`No\
+          \ problem with id ${ex.input?.problemId} found!`);\n      }\n    }\n\n \
+          \   if (!eventPayload) {\n      console.log(\"No event data found\");\n\
+          \      return { success: false, error: \"No event data\" };\n    }\n\n \
+          \   const history = emptyHistory();\n    for (const affectedEntity of eventPayload.affected_entity_ids)\
+          \ {\n      history.depth = 1;\n      await walk(\n        history,\n   \
+          \     undefined,\n        affectedEntity,\n        queryFrom,\n        queryTo,\n\
+          \        queryMaxDepth\n      );\n    }\n    const awsResources = getAWSResources(history);\n\
+          \    if (awsResources.length < minAWSResources) { \n      return {\n   \
+          \     success: true,\n        status: \"There were no aws resources, no\
+          \ need to investigate from AWS\",\n      };\n    }\n\n    eventPayload[\"\
+          event.name\"] = `${eventPayload[\"event.name\"]} (${eventPayload[\"display_id\"\
+          ]})`\n    eventPayload[\"event.description\"] = `Problem occured at ${\n\
+          \      eventPayload[\"event.start\"]\n    }. ${\n      eventPayload[\"event.description\"\
+          ]\n    }. The problem could be related with these AWS resources ${JSON.stringify(\n\
+          \      awsResources\n    )}. ${\n      eventPayload.root_cause_entity_id\n\
+          \        ? eventPayload.root_cause_entity_id +\n          \" has been identified\
+          \ as root cause!\"\n        : \"\"\n    }`;\n    eventPayload[\"event.status_transition\"\
+          ] = \"CREATED\";\n  } else {\n    eventPayload = {\n      \"event.id\":\
+          \ \"test\",\n      \"event.name\": \"this is only a connection test\",\n\
+          \      \"event.description\": \"this is only a connection test\",\n    \
+          \  \"event.category\": \"test\",\n      \"event.start\": \"test\",\n   \
+          \   \"event.end\": \"test\",\n      \"event.status\": \"test\",\n      \"\
+          event.status_transition\": \"test\",\n      \"event.affected_entity_ids\"\
+          : [],\n    };\n  }\n\n  const payload = JSON.stringify({\n    ...eventPayload,\n\
+          \    envId: getEnvironmentId(),\n  });\n\n  if (dryRun) {\n    console.log(\n\
+          \      `Dry run enabled, not sending payload to AWS DevOps Agent: ${payload}`\n\
+          \    );\n    return {\n      success: true,\n      status: \"Dry run enabled,\
+          \ not sending payload to AWS DevOps Agent\",\n      payload: payload,\n\
+          \    };\n  }\n\n  if (DEBUG) {\n    console.log(`Invoking AgentSpace\\n${payload}`);\n\
+          \  }\n\n  const timestamp = new Date().toISOString();\n  const signature\
+          \ = generateHMACSignature(`${timestamp}:${payload}`, credential.token);\n\
+          \  const response = await fetch(ex.input.awsDevOpsAgentEndpoint, {\n   \
+          \ method: \"POST\",\n    headers: {\n      \"Content-Type\": \"application/json\"\
+          ,\n      \"x-amzn-event-signature\": signature,\n      \"x-amzn-event-timestamp\"\
+          : timestamp\n    },\n    body: payload,\n  });\n\n  if (!response.ok) {\n\
+          \    const error = `Webhook failed: ${response.status} ${response.statusText}:\
+          \ ${await response.text()}`;\n    throw Error(`Invoking AWS DevOps Agent\
+          \ API failed, ${error}`);\n  }\n\n  console.log(\n    `Successfully trigger\
+          \ AWS DevOps Agent investigation for Dynatrace Problem ${eventPayload[\"\
+          event.id\"]}`\n  );\n  return {\n    success: true,\n    awsdevopsagent:\
+          \ {\n      body: JSON.stringify(response.body),\n      status: response.status,\n\
+          \      statusText: response.statusText,\n    },\n    eventId: eventPayload[\"\
+          event.id\"],\n    status: response.status,\n  };\n}\n"
+      action: dynatrace.automations:run-javascript
+      position:
+        x: -2
+        y: 2
+      conditions:
+        custom: ''
+        states:
+          report_processed: OK
+      description: Triage Dynatrace Problem and (if applicable) start AWS DevOps Agent
+        investigation
+      predecessors:
+      - report_processed

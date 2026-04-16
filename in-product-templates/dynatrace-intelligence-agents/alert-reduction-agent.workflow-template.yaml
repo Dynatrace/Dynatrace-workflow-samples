@@ -1,0 +1,181 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.automations
+      version: ^1.2879.1
+    - id: dynatrace.davis.copilot.workflow.actions
+      version: ^1.3.2-preview.0.1
+    - id: dynatrace.email
+      version: ^1.9.0
+  inputs: []
+workflow:
+  title: Alert Reduction Agent
+  description: An AI agent that delivers precise, data-driven insights by analyzing
+    and reporting spammy alert configurations on a weekly basis.
+  schemaVersion: 4
+  trigger:
+    schedule:
+      isActive: true
+      trigger:
+        cron: 0 0 * * MON
+        type: cron
+      filterParameters:
+        earliestStart: '2025-12-11'
+      timezone: UTC
+      inputs: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 10
+  guide: '# Alert Reduction Agent
+
+
+    The workflow leverages the Grail stored violation counts for single alert configuration
+    which are reported by the reference field ''dt.settings.object_id''.
+
+
+    # How to Setup
+
+
+    1. Enter your email address in the "to" field of the ["send_alert_fatique_report"
+    task](?task=send_alert_fatique_report&tab=input).
+
+
+    # Count Alerts per Setting
+
+
+    Check how many alerts were triggered by each alert configuration.
+
+
+    ```dql
+
+    fetch dt.davis.events, from:-24h, to:now()
+
+    | filter isNotNull(dt.settings.object_id)
+
+    | summarize count=count(), by:{dt.settings.object_id, dt.settings.schema_id, event.name,
+    event.category}
+
+    | sort count desc
+
+    ```
+
+
+    # Count Alerts per Entity
+
+
+    Identify overalerting by counting how many alerts per entity were triggered by
+    a specific alert
+
+
+    ```dql
+
+    fetch dt.davis.events, from:-24h, to:now()
+
+    | filter dt.settings.object_id == "vu9U3hXa3q0AAAABAB9idWlsdGluOmRhdmlzLmFub21hbHktZGV0ZWN0b3JzAAZ0ZW5hbnQABnRlbmFudAAkMDFlZGQxMWYtNDE2Ni0zOTA1LWFlZDUtMTc2M2U5NzU2OWY5vu9U3hXa3q0"
+
+    | summarize count=count(), by:{dt.source_entity, dt.source.entity.name, event.name,
+    event.category}
+
+    | sort count desc
+
+    ```
+
+
+    # Optimize Spammy Alerts
+
+
+    Inspect the alert setting (threshold, DQL, observation window). Optimize by:
+
+    * Switching model (e.g., seasonal baseline vs. static threshold)
+
+    * Adjusting threshold/sensitivity
+
+    * Expanding sliding window or required violating samples to filter noise'
+  tasks:
+    create_report:
+      name: create_report
+      input:
+        config: disabled
+        prompt: 'Evaluate the alert statistics to identify configurations likely causing
+          alert fatigue.
+
+          Provide an executive summary and a ranked list of problematic configurations
+          (1-5, 5 = very spammy).
+
+          Use minimal email formatting: newlines and tabs only.
+
+
+          '
+        autoTrim: true
+        supplementary: '{{ result(''query_alerts_per_entity'') }}{{ result(''query_alerts_statistic'')
+          }}'
+      action: dynatrace.davis.copilot.workflow.actions:davis-copilot
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          query_alerts_statistic: OK
+          query_alerts_per_entity: OK
+      description: Prompt the Dynatrace Intelligence generative AI
+      predecessors:
+      - query_alerts_statistic
+      - query_alerts_per_entity
+    query_alerts_statistic:
+      name: query_alerts_statistic
+      input:
+        query: 'fetch dt.davis.events, from:-7d, to:now()
+
+          | filter isNotNull(dt.settings.object_id)
+
+          | summarize count=count(), by:{dt.settings.object_id, dt.settings.schema_id,
+          event.name, event.category}
+
+          | sort count desc
+
+          | limit 50'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: 1
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    query_alerts_per_entity:
+      name: query_alerts_per_entity
+      input:
+        query: 'fetch dt.davis.events, from:-7d, to:now()
+
+          | filter isNotNull(dt.settings.object_id)
+
+          | summarize count=count(), by:{event.provider, dt.source_entity, dt.source_entity.type,
+          event.name, event.description, event.category, dt.settings.object_id}
+
+          | sort count desc
+
+          | limit 50'
+      action: dynatrace.automations:execute-dql-query
+      position:
+        x: -1
+        y: 1
+      description: Make use of Dynatrace Grail data in your workflow.
+      predecessors: []
+    send_alert_fatique_report:
+      name: send_alert_fatique_report
+      input:
+        cc: []
+        to: []
+        bcc: []
+        content: '{{ result(''create_report'')[''text''] }}'
+        subject: Alert fatique report
+      action: dynatrace.email:send-email
+      position:
+        x: 0
+        y: 3
+      conditions:
+        states:
+          create_report: OK
+      description: Send email
+      predecessors:
+      - create_report

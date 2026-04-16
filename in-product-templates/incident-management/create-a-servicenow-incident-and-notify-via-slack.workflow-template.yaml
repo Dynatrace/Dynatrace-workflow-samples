@@ -1,0 +1,174 @@
+metadata:
+  version: '1'
+  dependencies:
+    apps:
+    - id: dynatrace.servicenow
+      version: ^2.3.0
+    - id: dynatrace.slack
+      version: ^3.4.0
+  inputs:
+  - type: connection
+    schema: app:dynatrace.servicenow:connection
+    targets:
+    - tasks.create_an_incident.connectionId
+  - type: connection
+    schema: app:dynatrace.slack:connection
+    targets:
+    - tasks.send_message.connection
+workflow:
+  title: Create a ServiceNow incident and notify via Slack
+  description: Creates an Incident in ServiceNow, and forwards it to Slack.
+  schemaVersion: 4
+  trigger: {}
+  result: null
+  type: STANDARD
+  input: {}
+  hourlyExecutionLimit: 1000
+  guide: '# Setup
+
+
+    This workflow requires connections to both ServiceNow and Slack.
+
+
+    **ServiceNow connection**: If your environment doesn''t already have a ServiceNow
+    connection, you''ll need to create one. Go to **Settings** > **Connections** >
+    [ServiceNow](/ui/apps/dynatrace.settings/settings/dynatrace.servicenow) > **+
+    Connection**, provide your ServiceNow instance details, and click **Create**.
+    For details on how to configure the integration, see [ServiceNow documentation](https://dt-url.net/it03naf).
+
+
+    **Slack connection**: If your environment doesn''t already have a Slack connection,
+    you''ll need to create one. For detailed instructions, see [Set up Slack integration](https://docs.dynatrace.com/docs/analyze-explore-automate/workflows/actions/slack).
+
+
+    # Trigger
+
+
+    By default, this workflow uses an on-demand [trigger](?trigger=). You can leave
+    it as-is to trigger the workflow manually or via API.
+
+
+    You can update the trigger to run on a schedule (for example, daily or weekly
+    at a specific time for regular incident summaries).
+
+
+    To customize the trigger:
+
+    - **Filter by severity**: Modify the filter query to include specific severity
+    levels
+
+    - **Entity filtering**: Add entity tag filters in the trigger configuration to
+    limit notifications to specific services or hosts
+
+    - **Include problem closure**: Enable `onProblemClose` in trigger configuration
+    to track when problems resolve
+
+
+    To test the trigger configuration, select **Query past events** to view recent
+    problem events that would have triggered this workflow.
+
+
+    # Create the incident
+
+
+    In the task [create_an_incident](?task=create_an_incident&tab=input), configure
+    the incident details:
+
+
+    - **Impact** and **Urgency**: Set values from 1 (high) to 3 (low) to determine
+    incident priority
+
+    - **Category** and **Subcategory**: Adjust to match your ServiceNow configuration
+
+    - **Short description**: Automatically includes event category and name
+
+    - **Description**: Contains full event details in JSON format
+
+    - **Correlation ID**: Uses pattern `DT_<event.id>` to link incidents to Dynatrace
+    problems
+
+
+    The task automatically captures the incident URL, number, system ID, and correlation
+    ID for use in subsequent tasks.
+
+
+    # Configure the notification
+
+
+    In the task [send_message](?task=send_message&tab=input), specify the Slack channel
+    where notifications will be sent:
+
+
+    - **Channel**: Update the `channel` field with your Slack channel ID
+
+    - **Message**: The default message includes incident number, system ID, correlation
+    ID, and links to both ServiceNow and the workflow execution
+
+    - **Reactions**: Customize emoji reactions by modifying the `reaction` field
+
+    - **Thread options**: Enable `appendToThread` or `replyBroadcast` if you want
+    to organize notifications in threads'
+  tasks:
+    send_message:
+      name: send_message
+      input:
+        channel: C080F2TKR1D
+        message: ':rotating_light: *New ServiceNow Incident* :rotating_light:
+
+
+          *Incident Details:*
+
+          • *Number:* `{{ result("create_an_incident")["number"] }}`
+
+          • *System ID:* `{{ result("create_an_incident")["sys_id"] }}`
+
+          • *Correlation ID:* `{{ result("create_an_incident")["correlation_id"] }}`
+
+
+          :link: *Quick Links:*
+
+          • <{{ result("create_an_incident")["url"] }}|View Incident in ServiceNow>
+
+          • <{{execution().link}}|View Workflow Execution>
+
+
+          _Incident automatically created by Dynatrace Workflow_'
+        reaction:
+        - warning
+        connection: ''
+        channelType: id
+        executionDate: '{{ execution().started_at }}'
+        appendToThread: false
+        replyBroadcast: false
+        selectedRequestType: 0
+        attachmentToggleValue: none
+      action: dynatrace.slack:slack-send-message
+      position:
+        x: 0
+        y: 2
+      conditions:
+        states:
+          create_an_incident: OK
+      description: Send a message to a Slack workspace
+      predecessors:
+      - create_an_incident
+    create_an_incident:
+      name: create_an_incident
+      input:
+        caller: ''
+        impact: '3'
+        urgency: '3'
+        category: inquiry
+        description: 'Event details: {{ event() }}'
+        subCategory: internal application
+        connectionId: ''
+        correlationId: DT_{{ event()["event.id"] }}
+        shortDescription: '{{ event()["event.category"] }} {{ event()["event.name"]}}'
+      action: dynatrace.servicenow:snow-create-incident
+      position:
+        x: 0
+        y: 1
+      conditions:
+        states: {}
+      description: Create an incident in ServiceNow
+      predecessors: []
