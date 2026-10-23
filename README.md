@@ -1,5 +1,11 @@
 # Dynatrace-workflow-samples
 
+> [!IMPORTANT]
+> **This repository has moved to [Dynatrace/community-examples](https://github.com/Dynatrace/community-examples).**
+>
+> All workflow samples and JavaScript snippets are now maintained in the [`workflows/`](https://github.com/Dynatrace/community-examples/tree/main/workflows) folder of the new repository, alongside dashboards, notebooks, and other Dynatrace examples.
+> This repository is archived and read-only. Please open new issues and pull requests in [Dynatrace/community-examples](https://github.com/Dynatrace/community-examples).
+
 This repository collects sample workflows and javascripts snippets for Dynatrace AutomationEngine and the Workflows app. 
 
 ## Getting Started with Dynatrace AutomationEngine
